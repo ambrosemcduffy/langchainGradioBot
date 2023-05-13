@@ -10,7 +10,6 @@ alpaca_llm = LlamaForCausalLM.from_pretrained(
     "chavinlo/alpaca-native",
     load_in_8bit=False,
     device_map='auto',
-    offload="offload"
 )
 pipe = pipeline(
     "text-generation",

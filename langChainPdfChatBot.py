@@ -53,12 +53,12 @@ db = FAISS.from_documents(docs, embeddings)
 query = "What did the president say about the Supreme Court"
 docs = db.similarity_search(queryText)
 answer = chain.run(input_documents=docs, question=query)
-print(answer)
+#print(answer)
 
 
-# query = "What did the president say about economy?"
-# docs = db.similarity_search(query)
-# print(chain.run(input_documents=docs, question=query))
+query = "What did the president say about economy?"
+docs = db.similarity_search(query)
+#print(chain.run(input_documents=docs, question=query))
 
 
 from langchain.document_loaders import UnstructuredPDFLoader
@@ -67,19 +67,40 @@ from langchain.indexes import VectorstoreIndexCreator
 pdf_doc = "paper.pdf"
 
 loaders = UnstructuredPDFLoader(pdf_doc)
-print(loaders)
+#print(loaders)
 
 index = VectorstoreIndexCreator(
 embedding=HuggingFaceEmbeddings(),
-text_splitter=CharacterTextSplitter(chunk_size=400, chunk_overlap=0)).from_loaders([loaders])
+text_splitter=CharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
+).from_loaders([loaders])
 
-llm=HuggingFaceHub(repo_id="google/flan-t5-base", model_kwargs={"temperature":0, "max_length":512})
+llm=HuggingFaceHub(repo_id="google/flan-t5-large", model_kwargs={"temperature":0, "max_length":512})
 
 from langchain.chains import RetrievalQA
 chain = RetrievalQA.from_chain_type(llm=llm, 
-                                    chain_type="stuff", 
-                                    retriever=index.vectorstore.as_retriever(), 
-                                    input_key="question")
+                                     chain_type="stuff", 
+                                     retriever=index.vectorstore.as_retriever(search_type="similarity", search_kwargs={"k":10}), 
+                                     input_key="question")
 
 
-print(chain.run('what is a summary and overall concept of this paper?'))
+import time
+
+start = time.time()
+#print(chain.run('What is the monte carlo method\n'))
+query = 'Who are the authors?'
+docs = db.similarity_search(query, k=20)
+print(chain.run(input_documents = docs, question=query))
+
+query = 'Who are the authors of the paper?'
+docs = db.similarity_search(query, k=10)
+print(chain.run(input_documents = docs, question=query))
+
+
+query = 'What is a summary of the paper?'
+docs = db.similarity_search(query, k=20)
+print(chain.run(input_documents = docs, question=query))
+
+
+end = time.time()
+
+print((end-start)*100)
