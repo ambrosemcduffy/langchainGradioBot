@@ -22,16 +22,8 @@ os.environ["HUGGINGFACEHUB_API_TOKEN"] = "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"
 llm=HuggingFaceHub(repo_id="google/flan-t5-base", model_kwargs={"temperature":0, "max_length":512})
 chain = load_qa_chain(llm, chain_type="stuff")
 
-
-# grabbing text from a url
-url = "https://raw.githubusercontent.com/hwchase17/langchain/master/docs/modules/state_of_the_union.txt"
-res = requests.get(url)
-
-with open("state_of_the_union.txt", "w") as f:
-  f.write(res.text)
-
 # Loading in the Text
-loader = TextLoader('./state_of_the_union.txt')
+loader = TextLoader('./data.txt')
 documents = loader.load()
 
 
@@ -48,21 +40,38 @@ docs = text_splitter.split_documents(documents)
 
 # Embeddings
 embeddings = HuggingFaceEmbeddings()
-queryText = "what did joe biden say?"
 db = FAISS.from_documents(docs, embeddings)
-query = "What did the president say about the Supreme Court"
-docs = db.similarity_search(queryText)
-answer = chain.run(input_documents=docs, question=query)
-#print(answer)
-
-
-query = "What did the president say about economy?"
+query = "what is offramp?"
 docs = db.similarity_search(query)
-#print(chain.run(input_documents=docs, question=query))
+answer = chain.run(input_documents=docs, question=query)
+print(answer)
+
+query = "If I wanted to get my jobs and sort by priority how would I do that?"
+docs = db.similarity_search(query)
+answer = chain.run(input_documents=docs, question=query)
+print(answer)
+
+query = "How do I find jobs that are mine?"
+docs = db.similarity_search(query)
+answer = chain.run(input_documents=docs, question=query)
+print(answer)
+
+
+
+
+
+
+# query = "What did the president say about economy?"
+# docs = db.similarity_search(query)
+# print(chain.run(input_documents=docs, question=query))
 
 
 from langchain.document_loaders import UnstructuredPDFLoader
 from langchain.indexes import VectorstoreIndexCreator
+
+
+
+
 
 pdf_doc = "paper.pdf"
 
@@ -83,24 +92,21 @@ chain = RetrievalQA.from_chain_type(llm=llm,
                                      input_key="question")
 
 
-import time
 
-start = time.time()
-#print(chain.run('What is the monte carlo method\n'))
 query = 'Who are the authors?'
 docs = db.similarity_search(query, k=20)
 print(chain.run(input_documents = docs, question=query))
 
-query = 'Who are the authors of the paper?'
-docs = db.similarity_search(query, k=10)
-print(chain.run(input_documents = docs, question=query))
+# query = 'Who are the authors of the paper?'
+# docs = db.similarity_search(query, k=10)
+# print(chain.run(input_documents = docs, question=query))
 
 
-query = 'What is a summary of the paper?'
-docs = db.similarity_search(query, k=20)
-print(chain.run(input_documents = docs, question=query))
+# query = 'What is a summary of the paper?'
+# docs = db.similarity_search(query, k=20)
+# print(chain.run(input_documents = docs, question=query))
 
 
-end = time.time()
+# end = time.time()
 
-print((end-start)*100)
+# print((end-start)*100)

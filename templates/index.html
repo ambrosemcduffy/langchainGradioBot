@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chatbot</title>
+    <style>
+        /* Some basic styling for better visibility */
+        textarea {
+            width: 300px;
+            height: 60px;
+        }
+    </style>
+</head>
+
+<body>
+    <div>
+        <textarea id="userInput" placeholder="Type your message..."></textarea>
+        <button onclick="sendMessage()">Send</button>
+        <button onclick="clearChat()">Clear</button>
+    </div>
+    <div id="response"></div>
+
+    <script>
+        async function sendMessage() {
+            const message = document.getElementById('userInput').value;
+            const responseElement = document.getElementById('response');
+
+            if (!message.trim()) {
+                alert('Please enter a message before sending.');
+                return;
+            }
+
+            try {
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ message: message })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+
+                const data = await response.json();
+                responseElement.innerHTML += `<br>User: ${message}<br>Bot: ${data.response}`;
+                document.getElementById('userInput').value = ''; // Clear textarea
+
+            } catch (error) {
+                console.error('There was a problem with the fetch operation:', error.message);
+                responseElement.innerHTML += `<br>Bot: Sorry, there seems to be an issue on our side.`;
+            }
+        }
+
+        function clearChat() {
+            document.getElementById('userInput').value = '';  // Clear textarea
+            document.getElementById('response').innerHTML = '';  // Clear chat history
+        }
+    </script>
+</body>
+
+</html>
