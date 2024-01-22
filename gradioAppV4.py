@@ -44,25 +44,31 @@ os.environ["HUGGINGFACEHUB_API_TOKEN"] = "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"
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 import gc
 
+if not torch.backends.mps.is_available():
+    if not torch.backends.mps.is_built():
+        print(" MPS IS NOT AVAILABLE becuase current pytorch install was not build with mps enable")
+    else:
+        print("mPS NOT HERE BECAUSE CURRENT MACOS version is not 12.3+ and do not have mps enabled on the machine")
 
-def flush():
-    gc.collect()
-    torch.cuda.empty_cache()
-    torch.cuda.reset_peak_memory_stats()
+# def flush():
+#     gc.collect()
+#     torch.cuda.empty_cache()
+#     torch.cuda.reset_peak_memory_stats()
 
 
-flush()
+# flush()
 model_id = "mistralai/Mistral-7B-Instruct-v0.1"
-device = (
-    f"cuda:{torch.cuda.current_device()}"
-    if torch.cuda.is_available()
-    else "cpu"
-)  # Determine the device
+# device = (
+#     f"cuda:{torch.cuda.current_device()}"
+#     if torch.cuda.is_available()
+#     else "cpu"
+# )  # Determine the device
 
+device = "mps"
 model = AutoModelForCausalLM.from_pretrained(
     model_id, 
-    device_map="auto",
-    torch_dtype=torch.bfloat16
+    device_map="mps",
+    torch_dtype=torch.float16,    
     )
 
 model.tie_weights()
@@ -106,7 +112,7 @@ pipe = pipeline(
     tokenizer=tokenizer,
     trust_remote_code=False,
     use_cache=True,
-    device_map="auto",
+    device_map="mps",
     max_new_tokens=2046,
     max_length=2000,
     do_sample=True,
@@ -125,7 +131,7 @@ llm = HuggingFacePipeline(pipeline=pipe)
 def getModelEmbeddings():
     model_name = "BAAI/bge-large-en"
     encode_kwargs = {"normalize_embeddings": True}
-    model_kwargs = {"device": "cuda"}
+    model_kwargs = {"device": "mps"}
     return HuggingFaceEmbeddings(model_name=model_name, model_kwargs=model_kwargs)
 
 
@@ -467,7 +473,7 @@ import gradio as gr
 
 choices = ["LLM Chain", "QA Chain", "RAG Chain", "Seq Chain"]
 chainSelected = 0
-filePath = "/home/ambrosemcduffy/chatBotPDF/assetData.txt"
+filePath = "./assetData.txt"
 
 def select_chain(selected_item):
     global chainSelected
@@ -531,21 +537,21 @@ with gr.Blocks(css=dark_theme_css, theme='gradio/default') as demo:
                     history[-1][0] = ""     
                 
                 if choices[chainSelected] == "RAG Chain":
-                    flush()
+                    # flush()
                     rag_chain.invoke(history[-1][0])
                 
                 if choices[chainSelected] == "QA Chain":
-                    flush()
+                    # flush()
                     chat_history = []
                     qa_chain({"query": history[-1][0],"chat_history":chat_history})
                 
                 if choices[chainSelected] == "LLM Chain":
-                    flush()
+                    # flush()
                     chat_history = []
                     llm_chain({"question": history[-1][0], "chat_history":chat_history})
                 
                 if choices[chainSelected] == "seqChain":
-                    flush()
+                    # flush()
                     seqChain({"question": history[-1][0], "chat_history":chat_history})
                 
                 history[-1][1] = ""
