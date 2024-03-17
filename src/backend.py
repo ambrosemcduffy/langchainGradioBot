@@ -16,6 +16,7 @@ from langchain.llms.base import LLM
 from langchain.schema.runnable import RunnablePassthrough
 from langchain.schema.output_parser import StrOutputParser
 from langchain.memory import ConversationBufferMemory
+from llama_cpp import Llama
 
 from threading import Thread
 from typing import Optional
@@ -60,14 +61,23 @@ def getDevice():
 # Initialize our LLM
 device = getDevice()
 model_id = "mistralai/Mistral-7B-Instruct-v0.1"
+# model_id = "TheBloke/Mistral-7B-Instruct-v0.1-GGUF"
+# model_id = "google/gemma-7b-it"
+# model_id = "TheBloke/Mistral-7B-Instruct-v0.2-GGUF"
+
 model = AutoModelForCausalLM.from_pretrained(
     model_id,
     device_map=device,
-    torch_dtype=torch.float16,
+    torch_dtype=torch.float16
 )
+# from ctransformers import AutoModelForCausalLM
 
-model.tie_weights()
-model.eval()
+# model = AutoModelForCausalLM.from_pretrained("TheBloke/Mistral-7B-Instruct-v0.1-GGUF", model_file="mistral-7b-instruct-v0.1.Q4_K_M.gguf", model_type="mistral", gpu_layers=50)
+
+
+# model.tie_weights()
+# model.eval()
+
 tokenizer = AutoTokenizer.from_pretrained(model_id)
 streamer = TextStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
 stop_list = ["\nHuman:", "\n```\n"]
