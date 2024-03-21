@@ -27,12 +27,12 @@ import warnings
 import gradio as gr
 import json
 import const
+import gc
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
 os.environ["HUGGINGFACEHUB_API_TOKEN"] = "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"
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
-import gc
 
 
 def flush():
@@ -45,13 +45,12 @@ def flush():
 def getDevice():
     """This function finds the correct device to place the model on."""
     if torch.cuda.is_available():
-        print(f"Detected cuda device: {torch.cuda.get_device_name()}")
-        flush()
+        print(f"Detected cuda device User Nvidia GPU: {torch.cuda.get_device_name()}")
         # if Using for cuda devices
         device = f"cuda:{torch.cuda.current_device()}"
 
     elif torch.backends.mps.is_available():
-        print("Detected MPS device")
+        print("Detected MPS device use MacOS GPU METAL:")
         device = "mps"
     else:
         device = "cpu"
@@ -61,25 +60,46 @@ def getDevice():
 # Initialize our LLM
 device = getDevice()
 model_id = "mistralai/Mistral-7B-Instruct-v0.1"
-# model_id = "TheBloke/Mistral-7B-Instruct-v0.1-GGUF"
-# model_id = "google/gemma-7b-it"
-# model_id = "TheBloke/Mistral-7B-Instruct-v0.2-GGUF"
 
-model = AutoModelForCausalLM.from_pretrained(
-    model_id,
-    device_map=device,
-    torch_dtype=torch.float16
-)
-# from ctransformers import AutoModelForCausalLM
+if device == "mps":
+    from langchain.callbacks.manager import CallbackManager
+    from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
+    from langchain.chains import LLMChain
+    from langchain.prompts import PromptTemplate
+    from langchain.llms import LlamaCpp
 
-# model = AutoModelForCausalLM.from_pretrained("TheBloke/Mistral-7B-Instruct-v0.1-GGUF", model_file="mistral-7b-instruct-v0.1.Q4_K_M.gguf", model_type="mistral", gpu_layers=50)
+    # Callbacks support token-wise streaming
+    callback_manager = CallbackManager([StreamingStdOutCallbackHandler()])
 
+    n_gpu_layers = -1  # The number of layers to put on the GPU. The rest will be on the CPU. If you don't know how many layers there are, you can use -1 to move all to GPU.
+    n_batch = 512  # Should be between 1 and n_ctx, consider the amount of VRAM in your GPU.
 
-# model.tie_weights()
-# model.eval()
+    # Make sure the model path is correct for your system!
+    llm = LlamaCpp(
+        model_path="./models/llama-2-7b-arguments.Q8_0.gguf",
+        n_gpu_layers=n_gpu_layers,
+        n_batch=n_batch,
+        max_tokens=2046,
+        n_ctx=8192,
+        callback_manager=callback_manager,
+        verbose=True,  # Verbose is required to pass to the callback manager
+    )
+else:
+    
+    # model_id = "TheBloke/Mistral-7B-Instruct-v0.1-GGUF"
+    # model_id = "google/gemma-7b-it"
+    # model_id = "TheBloke/Mistral-7B-Instruct-v0.2-GGUF"
+
+    model = AutoModelForCausalLM.from_pretrained(
+        model_id,
+        device_map=device,
+        torch_dtype=torch.float16
+    )
+    model.tie_weights()
+    model.eval()
+
 
 tokenizer = AutoTokenizer.from_pretrained(model_id)
-streamer = TextStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
 stop_list = ["\nHuman:", "\n```\n"]
 stop_token_ids = [tokenizer(x)["input_ids"] for x in stop_list]
 stop_token_ids = [torch.LongTensor(x).to(device) for x in stop_token_ids]
@@ -124,34 +144,37 @@ def getModelEmbeddings():
     model_kwargs = {"device": "mps"}
     return HuggingFaceEmbeddings(model_name=model_name, model_kwargs=model_kwargs)
 
+if device != "mps":
+    streamer = TextStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
+    
+    
+    class CustomLLM(LLM):
+        """This is a custom LLM class similar to pipeline in HuggingFace"""
 
-class CustomLLM(LLM):
-    """This is a custom LLM class similar to pipeline in HuggingFace"""
+        streamer: Optional[TextIteratorStreamer] = None
 
-    streamer: Optional[TextIteratorStreamer] = None
+        def _call(self, prompt, stop=None, run_manager=None) -> str:
+            self.streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, Timeout=5)
+            inputs = tokenizer(prompt, return_tensors="pt")
+            inputs = move_inputs_to_device(
+                inputs, device
+            )  # Move inputs to the correct device
+            kwargs = dict(
+                input_ids=inputs["input_ids"],
+                streamer=self.streamer,
+                max_new_tokens=512,
+            )
+            thread = Thread(target=llm.stream, kwargs=kwargs)
+            thread.start()
+            return ""
 
-    def _call(self, prompt, stop=None, run_manager=None) -> str:
-        self.streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, Timeout=5)
-        inputs = tokenizer(prompt, return_tensors="pt")
-        inputs = move_inputs_to_device(
-            inputs, device
-        )  # Move inputs to the correct device
-        kwargs = dict(
-            input_ids=inputs["input_ids"],
-            streamer=self.streamer,
-            max_new_tokens=512,
-        )
-        thread = Thread(target=model.generate, kwargs=kwargs)
-        thread.start()
-        return ""
-
-    @property
-    def _llm_type(self) -> str:
-        return "custom"
-
-
-llm = CustomLLM()
-
+        @property
+        def _llm_type(self) -> str:
+            return "custom"
+    
+    
+    llm = CustomLLM()
+    
 
 def getLLMChain():
     """This function is a basic LLMChain to be simple
@@ -217,6 +240,22 @@ def getQARetreiverChain(vectordb):
     )
     return qa_chain
 
+def getNewLLMChain():
+    from operator import itemgetter
+    from langchain.memory import ConversationBufferMemory
+    from langchain.schema.runnable import RunnableLambda, RunnablePassthrough
+    prompt = PromptTemplate(
+    input_variables=["context", "question", "history"], template=const.llmChainTemplate1
+    )
+    memory = ConversationBufferMemory(memory_key="history", return_messages=True)
+    chain = (
+    RunnablePassthrough.assign(
+        history=RunnableLambda(memory.load_memory_variables) | itemgetter("history")
+    )
+    | prompt
+    | llm
+    )
+    return chain, memory
 
 def getSequentialChain():
     """Sequential Chain these are multiple LLMS being queried one after another."""

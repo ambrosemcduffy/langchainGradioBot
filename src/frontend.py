@@ -8,7 +8,7 @@ import json
 from theme_dropdown import create_theme_dropdown  # noqa: F401
 import gradio as gr
 
-choices = ["LLM Chain", "QA Chain", "RAG Chain", "Seq Chain"]
+choices = ["LLM Chain"]
 chainSelected = 0
 filePath = "./documents/assetData.txt"
 
@@ -22,14 +22,51 @@ def select_chain(selected_item):
 vectordb = backend.getVectorDB(filePath)
 rag_chain = backend.getRagChain(vectordb)
 qa_chain = backend.getQARetreiverChain(vectordb)
-llm_chain = backend.getLLMChain()
+llm_chain, memory = backend.getNewLLMChain()
 seqChain = backend.getSequentialChain()
 import re
-
+import time
 pause_streaming = False
 
+def streamChain(chain, history):
+    history[-1][1] = ""
+    for chunk in chain.stream(history[-1][0]):
+        if pause_streaming:
+            break
+        if len(chunk["text"]) != 0:
+            chunk = chunk["text"].lstrip("\n")
+            # chunk = re.sub(
+            #  "\n+", "\n", chunk
+            #  )
+            for char in chunk:
+                history[-1][1]  = history[-1][1]  + char
+                yield history
+
 dropdown, js = create_theme_dropdown()
+import threading
+class StreamController:
+    def __init__(self):
+        self.paused = False
+        self.condition = threading.Condition()
+
+    def pause(self):
+        with self.condition:
+            self.paused = True
+
+    def resume(self):
+        with self.condition:
+            self.paused = False
+            self.condition.notify_all()
+
+    def wait_while_paused(self):
+        with self.condition:
+            while self.paused:
+                self.condition.wait()
+                
+
 with gr.Blocks(css=const.dark_theme_css, theme="gradio/default") as demo:
+    controller = StreamController()
+
     with gr.Row().style(equal_height=True):
         with gr.Column(scale=5):
             gr.Markdown(
@@ -67,7 +104,7 @@ with gr.Blocks(css=const.dark_theme_css, theme="gradio/default") as demo:
     with gr.Row():
         with gr.Column(scale=2):
             chatbot = gr.Chatbot(
-                avatar_images=(const.imagePathHuman, const.imagePathBot),
+                avatar_images=(const.imagePathHuman, "/Users/ambrosemcduffy/Documents/langchainGradioBot/images/bot.png"),
                 bubble_full_width=False,
             )
             chatbot.like(backend.vote, None, None)
@@ -77,67 +114,50 @@ with gr.Blocks(css=const.dark_theme_css, theme="gradio/default") as demo:
 
             def bot(history):
                 global pause_streaming
+                global current_chain
                 if history[-1][0] is None:
                     history[-1][0] = ""
 
-                if choices[chainSelected] == "RAG Chain":
-                    # flush()
-                    rag_chain.invoke(history[-1][0])
-
-                if choices[chainSelected] == "QA Chain":
-                    # flush()
-                    chat_history = []
-                    qa_chain({"query": history[-1][0], "chat_history": chat_history})
-
                 if choices[chainSelected] == "LLM Chain":
-                    # flush()
-                    chat_history = []
-                    llm_chain(
-                        {"question": history[-1][0], "chat_history": chat_history}
-                    )
-
-                if choices[chainSelected] == "seqChain":
-                    # flush()
-                    seqChain({"question": history[-1][0], "chat_history": chat_history})
-
-                history[-1][1] = ""
-                for chunk in backend.llm.streamer:
-                    if pause_streaming:
-                        break
-                    chunk = chunk.lstrip("\n")  # Remove leading newlines
-                    chunk = re.sub(
-                        "\n+", "\n", chunk
-                    )  # Replace consecutive newlines with a single newline
-
-                    for character in chunk:
-                        print(character)
-                        history[-1][1] += character
-                        yield history
-                print(history[-1][1])
-                backend.resume_text_stream()
-
+                    history[-1][1] = ""
+                    for chunk in llm_chain.stream({"question": history[-1][0]}):
+                        if type(chunk) == dict:
+                            if chunk["text"] != None:
+                                chunk = chunk["text"]
+                        if len(chunk) != 0:
+                            for char in chunk:
+                                history[-1][1]  = history[-1][1]  + char
+                                yield history
+                        else:
+                            yield history
+                            break
+                        controller.wait_while_paused()
+                    if controller.paused:
+                        print("It's paused")
+                    memory.save_context({"input": history[-1][0]}, {"output": history[-1][1]})
+                    return history
+                          
+            msg = gr.Textbox(scale=7, max_height=500)
             with gr.Row(scale=1):
-                msg = gr.Textbox(scale=7, max_height=500)
-                msg.submit(user, [msg, chatbot], [msg, chatbot], queue=False).then(
+                msg_clickEvent = msg.submit(user, [msg, chatbot], [msg, chatbot], queue=False).then(
                     bot, chatbot, chatbot
                 )
-
                 submit_button = gr.Button(label="Submit", variant="primary")
                 submit_button.style(size="sm")
-                submit_button.click(
+                click_event = submit_button.click(
                     user, [msg, chatbot], [msg, chatbot], queue=False
                 ).then(bot, chatbot, chatbot)
-
-                pause_button = gr.Button("Pause Streaming", variant="secondary").style(
+                
+                stop_btn = gr.Button("Stop Streaming", variant="secondary").style(
                     size="sm"
                 )
-                pause_button.click(
-                    backend.pause_text_stream, None, chatbot, queue=False
-                )
-
+                
+                
+                btn_select.click(fn=select_chain, inputs=[chainDropdown], outputs=[])
+                stop_btn.click(fn=None, inputs=None, outputs=None, cancels=[click_event, msg_clickEvent])
+            with gr.Row(scale=1):
                 clear = gr.Button("Clear", variant="secondary").style(size="sm")
                 clear.click(lambda: None, None, chatbot, queue=False)
-                btn_select.click(fn=select_chain, inputs=[chainDropdown], outputs=[])
 
             gr.Examples(
                 [
