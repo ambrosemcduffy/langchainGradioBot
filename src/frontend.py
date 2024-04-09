@@ -3,34 +3,34 @@ import backend
 
 import gradio as gr
 import json
-
+import time
 
 from theme_dropdown import create_theme_dropdown  # noqa: F401
 import gradio as gr
 
+global chosenTemplate
 choices = ["LLM Chain", "Agent", "RAG"]
 chainSelected = 0
-
 filePath = "./documents/assetData.txt"
+chosenTemplate = const.llmChainTemplate
+chosenTemplateRAG = const.llmChainTemplateForRag
 
-
-def select_chain(selected_item, fileDisplay):
+def select_chain(selected_item):
     global chainSelected
     print(f" currently selected {choices[selected_item]}")
     chainSelected = selected_item
     print(chainSelected)
-    if choices[selected_item] == "RAG":
-        print("in rag chain")
-        fileDisplay.visible=False
+
 
 global vectordb
 # vectordb = backend.getVectorDB(filePath)
 
-# ragChain, memoryRAG = backend.getRagChain(vectordb)
+# ragChain, memoryRAG = backend.getRagChain(backend.llm, vectordb, const.llmChainTemplateGen)
 # qa_chain = backend.getQARetreiverChain(vectordb)
-llm_chain, memory = backend.getNewLLMChain(backend.llm)
-seqChain = backend.getSequentialChain()
+llm_chain, memory = backend.getLLMChain(backend.llm, const.llmChainTemplate)
 agentChain = backend.getNewAgentChain(backend.llm)
+
+# seqChain = backend.getSequentialChain()
 
 import re
 import time
@@ -70,19 +70,38 @@ class StreamController:
         with self.condition:
             while self.paused:
                 self.condition.wait()
+def wrap_in_code_block(text):
+    """
+    Wraps the text in backticks to create an inline code block in Markdown.
+    This prevents Markdown processing within the text.
 
-def update_chains(llm, vectordb=None, isRag=False):
+    Parameters:
+    text (str): The text to be wrapped.
+
+    Returns:
+    str: The text wrapped in an inline code block.
+    """
+    # Wrap the text in backticks
+    # Use triple backticks to ensure it's interpreted as a code block
+    return f"```\n{text}\n```"
+
+def update_chains(llm, template, vectordb=None, isRag=False):
     global ragChain, memoryRAG, llm_chain, memory
     if isRag:
-        ragChain, memoryRAG = backend.getRagChain(llm, vectordb)
+        ragChain, memoryRAG = backend.getRagChain(llm, vectordb, const.llmChainTemplateForRag)
     else:
-        llm_chain, memory = backend.getNewLLMChain(llm)
+        llm_chain, memory = backend.getLLMChain(llm, template)
 
 def handleTemperatureChange(temperatureValue, state):
     llm = backend.llm
     llm.temperature = temperatureValue
-    update_chains(llm)
+    update_chains(llm, chosenTemplate)
     return state
+
+def updatePrompt(newPrompt):
+     chosenTemplate = newPrompt
+     update_chains(backend.llm, newPrompt)
+     return wrap_in_code_block(newPrompt)
 
 def handle_uploaded_file(file_obj):
     if file_obj is not None:
@@ -91,7 +110,7 @@ def handle_uploaded_file(file_obj):
         llm = backend.llm
         vectordb = backend.getVectorDB(filePath)
         # Update the chains with the new vectordb
-        update_chains(llm, vectordb, isRag=True)
+        update_chains(llm, const.llmChainTemplate, vectordb, isRag=True)
         return filePath
     return "No file uploaded"
 
@@ -121,7 +140,7 @@ with gr.Blocks(css=const.dark_theme_css, theme="gradio/default") as demo:
                         value=choices[0],
                         type="index",
                     )
-                    btn_select = gr.Button(value="Get Chain")
+                    chainDropdown.change(select_chain, inputs=chainDropdown, outputs=[])
                 with gr.Tab("Parameters"):
                     with gr.Row():
                         with gr.Column():
@@ -130,8 +149,11 @@ with gr.Blocks(css=const.dark_theme_css, theme="gradio/default") as demo:
                             state = gr.State(value=0)
                             tempSlider.release(handleTemperatureChange, inputs=[tempSlider, state], outputs=[state])
                             with gr.Accordion("Prompt", open=False):
-                                prompt = gr.Markdown(const.llmChainTemplate)
-                                newPrompt = gr.Textbox(label="New Prompt", visible=True)
+                                promptMarkdown = gr.Markdown(wrap_in_code_block(const.llmChainTemplate))
+                                newPrompt = gr.TextArea(label="New Prompt", visible=True, min_width=400, scale=5, lines=10)
+                                submitPromptButton = gr.Button(value="Submit New Prompt").style(size="sm")
+                                newPrompt.change(fn=updatePrompt, inputs=newPrompt, outputs=promptMarkdown)
+
                         
                 with gr.Tab("Document upload"):
                     with gr.Row():
@@ -184,6 +206,7 @@ with gr.Blocks(css=const.dark_theme_css, theme="gradio/default") as demo:
                 if choices[chainSelected] == "RAG":
                     # if file_path_display.visible != True:
                     #     file_path_display.visible = True
+                    print("Inside raaaaag!!!!!")
                     history[-1][1] = ""
                     question = history[-1][0]
                     chain = ragChain
@@ -200,16 +223,17 @@ with gr.Blocks(css=const.dark_theme_css, theme="gradio/default") as demo:
                         elif "output" in chunk.keys():
                             chunk = chunk["output"]
                     if len(chunk) != 0:
-                        for char in chunk:
-                            history[-1][1]  = history[-1][1]  + char
-                            yield history
-                    else:
+                        print(chunk)
+                        history[-1][1]  = history[-1][1]  + chunk
                         yield history
-                        break
-                    controller.wait_while_paused()
-                
-                if controller.paused:
-                    print("It's paused")
+                    #     for char in chunk:
+                    #         # time.sleep(0.01)
+                    #         history[-1][1]  = history[-1][1]  + char
+                    #         yield history
+                    # else:
+                    #     yield history
+                    #     break
+                    # controller.wait_while_paused()
                 if chainSelected != "RAG":
                     memory.save_context({"input": history[-1][0]}, {"output": history[-1][1]})
                 else:
@@ -232,8 +256,6 @@ with gr.Blocks(css=const.dark_theme_css, theme="gradio/default") as demo:
                     size="sm"
                 )
                 
-                btn_selectClickEvent = btn_select.click(fn=select_chain, inputs=[chainDropdown, uploaded_file], outputs=[]).then()
-
                 stop_btn.click(fn=None, inputs=None, outputs=None, cancels=[click_event, msg_clickEvent])
             with gr.Row(scale=1):
                 clear = gr.Button("Clear", variant="secondary").style(size="sm")

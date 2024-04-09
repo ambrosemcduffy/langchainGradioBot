@@ -81,7 +81,8 @@ if device == "mps":
         n_gpu_layers=n_gpu_layers,
         n_batch=n_batch,
         #max_tokens=4096,
-        max_tokens=2046,
+        # max_tokens=2046,
+        max_tokens=900,
         n_ctx=8192,
         temperature=0.3,
         callback_manager=callback_manager,
@@ -193,34 +194,12 @@ def getModelEmbeddings():
 #     llm = CustomLLM()
     
 
-def getLLMChain():
-    """This function is a basic LLMChain to be simple
-    it's an non-query data llm, so a basic llm model.
-    """
-    from langchain import PromptTemplate
-    from langchain import LLMChain
-
-    memory = ConversationBufferMemory(
-        memory_key="chat_history", input_key="question", return_messages=True
-    )
-    memory = ConversationBufferWindowMemory(
-        memory_key="chat_history", k=5, input_key="question", return_messages=True
-    )
-
-    CHAIN_PROMPT = PromptTemplate(
-        input_variables=["question"], template=const.llmChainTemplate
-    )
-
-    print("Using basic Chain")
-    llm_chain = LLMChain(prompt=CHAIN_PROMPT, llm=llm, memory=memory, verbose=True)
-    return llm_chain
-
-def getNewLLMChain(llm):
+def getLLMChain(llm, template):
     from operator import itemgetter
     from langchain.memory import ConversationBufferMemory
     from langchain.schema.runnable import RunnableLambda, RunnablePassthrough
     prompt = PromptTemplate(
-    input_variables=["context", "question", "history"], template=const.llmChainTemplate
+    input_variables=["context", "question", "history"], template=template
     )
     memory = ConversationBufferMemory(memory_key="history", return_messages=True)
     chain = (
@@ -234,29 +213,12 @@ def getNewLLMChain(llm):
     return chain, memory
 
 
-# def getRagChain(vectordb):
-#     QA_CHAIN_PROMPT = PromptTemplate(
-#         input_variables=["context", "question"], template=const.documentQueryTemplate
-#     )
-
-#     rag_chain = (
-#         {
-#             "context": vectordb.as_retriever(search_kwargs={"k": 6}),
-#             "question": RunnablePassthrough(),
-#         }
-#         | QA_CHAIN_PROMPT
-#         | llm
-#         | StrOutputParser()
-#     )
-#     return rag_chain
-
-
-def getRagChain(llm, vectordb):
+def getRagChain(llm, vectordb, template):
     from operator import itemgetter
     from langchain.memory import ConversationBufferMemory
     from langchain.schema.runnable import RunnableLambda, RunnablePassthrough
     QA_CHAIN_PROMPT = PromptTemplate(
-        input_variables=["context", "question", "history"], template=const.llmChainTemplateForRag
+        input_variables=["context", "question", "history"], template=template
     )
     memory = ConversationBufferMemory(memory_key="history", return_messages=True)
     rag_chain = (
