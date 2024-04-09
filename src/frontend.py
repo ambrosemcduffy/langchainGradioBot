@@ -87,6 +87,8 @@ def wrap_in_code_block(text):
 
 def update_chains(llm, template, vectordb=None, isRag=False):
     global ragChain, memoryRAG, llm_chain, memory
+
+    print(llm.temperature, llm.max_tokens)
     if isRag:
         ragChain, memoryRAG = backend.getRagChain(llm, vectordb, const.llmChainTemplateForRag)
     else:
@@ -95,6 +97,24 @@ def update_chains(llm, template, vectordb=None, isRag=False):
 def handleTemperatureChange(temperatureValue, state):
     llm = backend.llm
     llm.temperature = temperatureValue
+    update_chains(llm, chosenTemplate)
+    return state
+
+def handleMaxTokensChange(maxTokensValue, state):
+    llm = backend.llm
+    llm.max_tokens = maxTokensValue
+    update_chains(llm, chosenTemplate)
+    return state
+
+def handleTopKChange(topKValue, state):
+    llm = backend.llm
+    llm.top_k = topKValue
+    update_chains(llm, chosenTemplate)
+    return state
+
+def handleTopPChange(topPValue, state):
+    llm = backend.llm
+    llm.top_p = topPValue
     update_chains(llm, chosenTemplate)
     return state
 
@@ -148,10 +168,25 @@ with gr.Blocks(css=const.dark_theme_css, theme="gradio/default") as demo:
                             tempSlider.value = backend.llm.temperature
                             state = gr.State(value=0)
                             tempSlider.release(handleTemperatureChange, inputs=[tempSlider, state], outputs=[state])
+
+                            maxTokensSlider = gr.Slider(minimum=50, maximum=4096, randomize=False, label="Max Tokens")
+                            maxTokensSlider.value = backend.llm.max_tokens
+                            maxTokensState = gr.State(value=0)
+                            maxTokensSlider.release(handleMaxTokensChange, inputs=[maxTokensSlider, maxTokensState], outputs=[maxTokensState])
+
+                            topKSlider = gr.Slider(minimum=1, maximum=50, randomize=False, label="Top K")
+                            topKSlider.value = backend.llm.top_k
+                            topKState = gr.State(value=0)
+                            topKSlider.release(handleTopKChange, inputs=[topKSlider, topKState], outputs=[topKState])
+
+                            topPSlider = gr.Slider(minimum=0.1, maximum=1.0, randomize=False, label="Top P (Nucleus sampling)")
+                            topPSlider.value = backend.llm.top_p
+                            topPState = gr.State(value=0)
+                            topPSlider.release(handleTopPChange, inputs=[topPSlider, topPState], outputs=[topPState])
+
                             with gr.Accordion("Prompt", open=False):
                                 promptMarkdown = gr.Markdown(wrap_in_code_block(const.llmChainTemplate))
                                 newPrompt = gr.TextArea(label="New Prompt", visible=True, min_width=400, scale=5, lines=10)
-                                submitPromptButton = gr.Button(value="Submit New Prompt").style(size="sm")
                                 newPrompt.change(fn=updatePrompt, inputs=newPrompt, outputs=promptMarkdown)
 
                         
