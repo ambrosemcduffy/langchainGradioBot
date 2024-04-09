@@ -252,19 +252,21 @@ with gr.Blocks(css=const.dark_theme_css, theme="gradio/default") as demo:
                     chain = llm_chain
 
                 for chunk in chain.stream(question):
+                    time.sleep(0.01)
+
                     if type(chunk) == dict:
                         if "text" in chunk.keys():
                             chunk = chunk["text"]
                         elif "output" in chunk.keys():
                             chunk = chunk["output"]
                     if len(chunk) != 0:
-                        print(chunk)
-                        history[-1][1]  = history[-1][1]  + chunk
-                        yield history
-                    #     for char in chunk:
-                    #         # time.sleep(0.01)
-                    #         history[-1][1]  = history[-1][1]  + char
-                    #         yield history
+                        #time.sleep(0.01)
+                        # history[-1][1]  = history[-1][1]  + chunk
+                        for char in chunk:
+                            # time.sleep(0.01)
+                            if char != '<':
+                                history[-1][1]  = history[-1][1]  + char
+                                yield history
                     # else:
                     #     yield history
                     #     break
