@@ -9,14 +9,15 @@ from transformers import pipeline, TextStreamer
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
-from langchain.document_loaders import TextLoader
+from langchain.document_loaders import TextLoader, DirectoryLoader, PyPDFLoader, UnstructuredExcelLoader, UnstructuredPDFLoader, PyMuPDFLoader
 from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.vectorstores import FAISS
+from langchain.vectorstores import FAISS, Chroma
 from langchain.llms.base import LLM
 from langchain.schema.runnable import RunnablePassthrough
 from langchain.schema.output_parser import StrOutputParser
 from langchain.memory import ConversationBufferMemory
 from llama_cpp import Llama
+from langchain.globals import set_debug
 
 from threading import Thread
 from typing import Optional
@@ -34,7 +35,7 @@ warnings.filterwarnings("ignore", category=UserWarning)
 os.environ["HUGGINGFACEHUB_API_TOKEN"] = "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"
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
-
+set_debug(True)
 def flush():
     gc.collect()
     torch.cuda.empty_cache()
@@ -60,7 +61,7 @@ def getDevice():
 # Initialize our LLM
 device = getDevice()
 model_id = "mistralai/Mistral-7B-Instruct-v0.1"
-
+global llm
 if device == "mps":
     from langchain.callbacks.manager import CallbackManager
     from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
@@ -79,8 +80,10 @@ if device == "mps":
         model_path="./models/llama-2-7b-arguments.Q8_0.gguf",
         n_gpu_layers=n_gpu_layers,
         n_batch=n_batch,
+        #max_tokens=4096,
         max_tokens=2046,
         n_ctx=8192,
+        temperature=0.3,
         callback_manager=callback_manager,
         verbose=True,  # Verbose is required to pass to the callback manager
     )
@@ -128,13 +131,27 @@ def move_inputs_to_device(inputs, device):
 
 def getVectorDB(path):
     """Gets vector db for our documents."""
-    loader = TextLoader(path)
-    # loader = DirectoryLoader("/home/ambrosemcduffy/Downloads/documents", glob="./*/*.pdf", loader_cls=PyPDFLoader)
+
+    if path[-3:] == "txt":
+        loader = TextLoader(path)
+    # loader = DirectoryLoader(path, glob="./*/*.pdf", loader_cls=PyPDFLoader)
+    elif path[-3:] == "pdf":
+        #loader = PyPDFLoader(path, extract_images=True)
+        loader = UnstructuredPDFLoader(path)
+        print("using pdf")
+    elif path[-4:] == "xlsx":
+        loader = UnstructuredExcelLoader(path, )
     pages = loader.load()
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=3000, chunk_overlap=0)
     embeddings = getModelEmbeddings()
     data_split = text_splitter.split_documents(pages)
+    # vectordb = Chroma.from_documents(
+    #     data_split,
+    #     embedding=getModelEmbeddings(),
+    #     )
+    
     return FAISS.from_documents(data_split, embeddings)
+    # return vectordb
 
 
 def getModelEmbeddings():
@@ -144,36 +161,36 @@ def getModelEmbeddings():
     model_kwargs = {"device": "mps"}
     return HuggingFaceEmbeddings(model_name=model_name, model_kwargs=model_kwargs)
 
-if device != "mps":
-    streamer = TextStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
+# if device != "mps":
+#     streamer = TextStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
     
     
-    class CustomLLM(LLM):
-        """This is a custom LLM class similar to pipeline in HuggingFace"""
+#     class CustomLLM(LLM):
+#         """This is a custom LLM class similar to pipeline in HuggingFace"""
 
-        streamer: Optional[TextIteratorStreamer] = None
+#         streamer: Optional[TextIteratorStreamer] = None
 
-        def _call(self, prompt, stop=None, run_manager=None) -> str:
-            self.streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, Timeout=5)
-            inputs = tokenizer(prompt, return_tensors="pt")
-            inputs = move_inputs_to_device(
-                inputs, device
-            )  # Move inputs to the correct device
-            kwargs = dict(
-                input_ids=inputs["input_ids"],
-                streamer=self.streamer,
-                max_new_tokens=512,
-            )
-            thread = Thread(target=llm.stream, kwargs=kwargs)
-            thread.start()
-            return ""
+#         def _call(self, prompt, stop=None, run_manager=None) -> str:
+#             self.streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, Timeout=5)
+#             inputs = tokenizer(prompt, return_tensors="pt")
+#             inputs = move_inputs_to_device(
+#                 inputs, device
+#             )  # Move inputs to the correct device
+#             kwargs = dict(
+#                 input_ids=inputs["input_ids"],
+#                 streamer=self.streamer,
+#                 max_new_tokens=512,
+#             )
+#             thread = Thread(target=llm.stream, kwargs=kwargs)
+#             thread.start()
+#             return ""
 
-        @property
-        def _llm_type(self) -> str:
-            return "custom"
+#         @property
+#         def _llm_type(self) -> str:
+#             return "custom"
     
     
-    llm = CustomLLM()
+#     llm = CustomLLM()
     
 
 def getLLMChain():
@@ -198,25 +215,64 @@ def getLLMChain():
     llm_chain = LLMChain(prompt=CHAIN_PROMPT, llm=llm, memory=memory, verbose=True)
     return llm_chain
 
-
-def getRagChain(vectordb):
-    QA_CHAIN_PROMPT = PromptTemplate(
-        input_variables=["context", "question"], template=const.documentQueryTemplate
+def getNewLLMChain(llm):
+    from operator import itemgetter
+    from langchain.memory import ConversationBufferMemory
+    from langchain.schema.runnable import RunnableLambda, RunnablePassthrough
+    prompt = PromptTemplate(
+    input_variables=["context", "question", "history"], template=const.llmChainTemplate
     )
+    memory = ConversationBufferMemory(memory_key="history", return_messages=True)
+    chain = (
+    RunnablePassthrough.assign(
+        history=RunnableLambda(memory.load_memory_variables) | itemgetter("history")
+    )
+    
+    | prompt
+    | llm
+    )
+    return chain, memory
 
+
+# def getRagChain(vectordb):
+#     QA_CHAIN_PROMPT = PromptTemplate(
+#         input_variables=["context", "question"], template=const.documentQueryTemplate
+#     )
+
+#     rag_chain = (
+#         {
+#             "context": vectordb.as_retriever(search_kwargs={"k": 6}),
+#             "question": RunnablePassthrough(),
+#         }
+#         | QA_CHAIN_PROMPT
+#         | llm
+#         | StrOutputParser()
+#     )
+#     return rag_chain
+
+
+def getRagChain(llm, vectordb):
+    from operator import itemgetter
+    from langchain.memory import ConversationBufferMemory
+    from langchain.schema.runnable import RunnableLambda, RunnablePassthrough
+    QA_CHAIN_PROMPT = PromptTemplate(
+        input_variables=["context", "question", "history"], template=const.llmChainTemplateForRag
+    )
+    memory = ConversationBufferMemory(memory_key="history", return_messages=True)
     rag_chain = (
         {
-            "context": vectordb.as_retriever(search_kwargs={"k": 6}),
+            "context": vectordb.as_retriever(search_kwargs={"k":3}),
             "question": RunnablePassthrough(),
+            "history": RunnableLambda(memory.load_memory_variables) | itemgetter("history")
         }
         | QA_CHAIN_PROMPT
         | llm
         | StrOutputParser()
     )
-    return rag_chain
+    return rag_chain, memory
 
 
-def getQARetreiverChain(vectordb):
+def getQARetreiverChain(llm, vectordb):
     QA_CHAIN_PROMPT = PromptTemplate(
         input_variables=["context", "question"], template=const.qaTemplate
     )
@@ -239,23 +295,6 @@ def getQARetreiverChain(vectordb):
         },
     )
     return qa_chain
-
-def getNewLLMChain():
-    from operator import itemgetter
-    from langchain.memory import ConversationBufferMemory
-    from langchain.schema.runnable import RunnableLambda, RunnablePassthrough
-    prompt = PromptTemplate(
-    input_variables=["context", "question", "history"], template=const.llmChainTemplate1
-    )
-    memory = ConversationBufferMemory(memory_key="history", return_messages=True)
-    chain = (
-    RunnablePassthrough.assign(
-        history=RunnableLambda(memory.load_memory_variables) | itemgetter("history")
-    )
-    | prompt
-    | llm
-    )
-    return chain, memory
 
 def getSequentialChain():
     """Sequential Chain these are multiple LLMS being queried one after another."""
@@ -308,7 +347,7 @@ def getSequentialChain():
     return overall_simple_chain
 
 
-def getAgent():
+def getAgent(llm):
     from langchain.agents import load_tools, initialize_agent
     from langchain.agents import AgentType
 
@@ -322,7 +361,36 @@ def getAgent():
     )
     return agent
 
+def getNewAgentChain(llm):
+    from langchain.agents import load_tools, initialize_agent
+    from langchain.agents import AgentType
+    PREFIX = """<<SYS>> You are an AI ChatBot AGent Designed to help students with Research. Follow these guidelines:
+    1. Adopt a formal tone throughout the interaction.
+    2. Provide detailed, step-by-step explanations, ensuring your responses are thorough and considerate.
+    3. If you know the answer, provide it directly and clearly. If the answer is unknown or uncertain, state "I don't know" or "I'm unsure" and explain why, without fabricating details.
+    4. When presenting code, ensure it is clean, well-commented, and easy for users to understand.
+    5. Rephrase and clarify the user's question if necessary to ensure accurate understanding and responses.
+    6. Aim to provide a direct answer to every question. If a direct answer isn't possible, guide the user on how they might find the answer or suggest alternative approaches to address their inquiry.
+    7. Ensure your responses are accurate, clear, and detailed, helping the user gain a comprehensive understanding of the topic.
+    8. When detailed information is not available, guide the user on how to find reliable sources or suggest potential avenues for further inquiry.
+    9. In cases involving recent developments or current events, advise users to check the latest information, as situations can evolve rapidly. 
+    10. Provide information bullet points and be detailed oriented. .<</SYS>>\n"""
 
+    tools = load_tools(["wikipedia"], llm=llm)
+    agent = initialize_agent(
+        tools,
+        llm,
+        agent=AgentType.CHAT_ZERO_SHOT_REACT_DESCRIPTION,
+        handle_parsing_errors=True,
+        verbose=True,
+        max_iterations = 10,
+        agent_kwargs={
+        'prefix': PREFIX, 
+#         'format_instructions': FORMAT_INSTRUCTIONS,
+#         'suffix': SUFFIX
+    }
+    )
+    return agent
 # Tested this with langchain '0.0.179'
 def vote(data: gr.LikeData):
     file_path = "chat_data.json"
