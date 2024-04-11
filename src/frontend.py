@@ -2,7 +2,6 @@ import const
 import backend
 
 import gradio as gr
-import json
 import time
 
 from theme_dropdown import create_theme_dropdown  # noqa: F401
@@ -23,17 +22,13 @@ def select_chain(selected_item):
 
 
 global vectordb
-# vectordb = backend.getVectorDB(filePath)
-
-# ragChain, memoryRAG = backend.getRagChain(backend.llm, vectordb, const.llmChainTemplateGen)
-# qa_chain = backend.getQARetreiverChain(vectordb)
+vectordb = backend.getVectorDB(filePath)
+ragChain, memoryRAG = backend.getRagChain(backend.llm, vectordb, const.llmChainTemplateForRag)
 llm_chain, memory = backend.getLLMChain(backend.llm, const.llmChainTemplate)
 agentChain = backend.getNewAgentChain(backend.llm)
+#seqChain = backend.getSequentialChain()
 
-# seqChain = backend.getSequentialChain()
 
-import re
-import time
 pause_streaming = False
 
 def streamChain(chain, history):
@@ -70,6 +65,7 @@ class StreamController:
         with self.condition:
             while self.paused:
                 self.condition.wait()
+
 def wrap_in_code_block(text):
     """
     Wraps the text in backticks to create an inline code block in Markdown.
@@ -134,6 +130,16 @@ def handle_uploaded_file(file_obj):
         return filePath
     return "No file uploaded"
 
+def handle_urlInsert(urlPath):
+        print("uploading url path")
+        print(urlPath)
+        # Update vectordb with the new file
+        llm = backend.llm
+        vectordb = backend.getVectorDB(urlPath)
+        # Update the chains with the new vectordb
+        update_chains(llm, const.llmChainTemplate, vectordb, isRag=True)
+
+
 with gr.Blocks(css=const.dark_theme_css, theme="gradio/default") as demo:
     controller = StreamController()
     with gr.Row().style(equal_height=True):
@@ -151,8 +157,6 @@ with gr.Blocks(css=const.dark_theme_css, theme="gradio/default") as demo:
         with gr.Column(scale=3):
             with gr.Group():
                 with gr.Tab("Chain Selections"):
-                    # dropdown.render()
-                    # toggle_dark = gr.Button(value="Toggle Dark").style(full_width=True)
                     chainDropdown = gr.Dropdown(
                         choices=choices,
                         label="Select Chain",
@@ -188,7 +192,6 @@ with gr.Blocks(css=const.dark_theme_css, theme="gradio/default") as demo:
                                 promptMarkdown = gr.Markdown(wrap_in_code_block(const.llmChainTemplate))
                                 newPrompt = gr.TextArea(label="New Prompt", visible=True, min_width=400, scale=5, lines=10)
                                 newPrompt.change(fn=updatePrompt, inputs=newPrompt, outputs=promptMarkdown)
-
                         
                 with gr.Tab("Document upload"):
                     with gr.Row():
@@ -196,21 +199,10 @@ with gr.Blocks(css=const.dark_theme_css, theme="gradio/default") as demo:
                             uploaded_file = gr.File(label="Upload your text file", type="file", file_types=["txt"], visible=True)
                             file_path_display = gr.Textbox(label="File Path", visible=True)
                             uploaded_file.change(handle_uploaded_file, inputs=[uploaded_file], outputs=[file_path_display])
+                            urlPath = gr.Textbox(label="URL Path", visible=True)
+                            urlPath.change(handle_urlInsert, inputs=[urlPath], outputs=[])
                         
-    
-    dropdown.change(None, dropdown, None, _js=js)
-    # toggle_dark.click(
-    #     None,
-    #     _js="""
-    #     () => {
-    #         document.body.classList.toggle('dark');
-    #         document.querySelector('gradio-app').style.backgroundColor = 'var(--color-background-primary)'
-    #     }
-    #     """,
-    # )
-
     with gr.Row():
-        
         with gr.Column(scale=4):
             with gr.Row():  
                 chatbot = gr.Chatbot(
@@ -219,17 +211,12 @@ with gr.Blocks(css=const.dark_theme_css, theme="gradio/default") as demo:
                 )
                 chatbot.like(backend.vote, None, None)
                 
-                    
-
-
-            
             def user(user_message, history):
                 return "", history + [[user_message, None]]
 
             def bot(history):
                 global pause_streaming
                 global current_chain
-                print(backend.llm.temperature)
                 if history[-1][0] is None:
                     history[-1][0] = ""
                 
@@ -260,17 +247,11 @@ with gr.Blocks(css=const.dark_theme_css, theme="gradio/default") as demo:
                         elif "output" in chunk.keys():
                             chunk = chunk["output"]
                     if len(chunk) != 0:
-                        #time.sleep(0.01)
-                        # history[-1][1]  = history[-1][1]  + chunk
                         for char in chunk:
-                            # time.sleep(0.01)
                             if char != '<':
                                 history[-1][1]  = history[-1][1]  + char
                                 yield history
-                    # else:
-                    #     yield history
-                    #     break
-                    # controller.wait_while_paused()
+
                 if chainSelected != "RAG":
                     memory.save_context({"input": history[-1][0]}, {"output": history[-1][1]})
                 else:

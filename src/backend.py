@@ -9,7 +9,7 @@ from transformers import pipeline, TextStreamer
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
-from langchain.document_loaders import TextLoader, DirectoryLoader, PyPDFLoader, UnstructuredExcelLoader, UnstructuredPDFLoader, PyMuPDFLoader
+from langchain.document_loaders import TextLoader, UnstructuredExcelLoader, UnstructuredPDFLoader, WebBaseLoader
 from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.vectorstores import FAISS, Chroma
 from langchain.llms.base import LLM
@@ -62,11 +62,40 @@ def getDevice():
 device = getDevice()
 model_id = "mistralai/Mistral-7B-Instruct-v0.1"
 global llm
-if device == "mps":
+
+
+class CustomLLM(LLM):
+    """This is a custom LLM class similar to pipeline in HuggingFace"""
+    streamer: Optional[TextIteratorStreamer] = None
+    def _call(self, prompt, stop=None, run_manager=None) -> str:
+        self.tokenizer = AutoTokenizer.from_pretrained(model_id)
+        self.streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, Timeout=5)
+        inputs = self.tokenizer(prompt, return_tensors="pt")
+        inputs = move_inputs_to_device(
+            inputs, device
+        )  # Move inputs to the correct device
+        kwargs = dict(
+            input_ids=inputs["input_ids"],
+            streamer=self.streamer,
+            max_new_tokens=512,
+        )
+        thread = Thread(target=getHuggingFaceModel().generate(), kwargs=kwargs)
+        thread.start()
+        return ""
+
+    @property
+    def _llm_type(self) -> str:
+        return "custom"
+
+
+def getLLM():
+    if device != "mps":
+        return CustomLLM(LLM)
+    return getLlamaCppModel()
+
+def getLlamaCppModel():
     from langchain.callbacks.manager import CallbackManager
     from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
-    from langchain.chains import LLMChain
-    from langchain.prompts import PromptTemplate
     from langchain.llms import LlamaCpp
 
     # Callbacks support token-wise streaming
@@ -80,48 +109,23 @@ if device == "mps":
         model_path="./models/llama-2-7b-arguments.Q8_0.gguf",
         n_gpu_layers=n_gpu_layers,
         n_batch=n_batch,
-        #max_tokens=4096,
-        # max_tokens=2046,
         max_tokens=900,
         n_ctx=8192,
         temperature=0.3,
         callback_manager=callback_manager,
         verbose=True,  # Verbose is required to pass to the callback manager
     )
-else:
-    
-    # model_id = "TheBloke/Mistral-7B-Instruct-v0.1-GGUF"
-    # model_id = "google/gemma-7b-it"
-    # model_id = "TheBloke/Mistral-7B-Instruct-v0.2-GGUF"
+    return llm
 
-    model = AutoModelForCausalLM.from_pretrained(
+def getHuggingFaceModel():
+    llm = AutoModelForCausalLM.from_pretrained(
         model_id,
         device_map=device,
         torch_dtype=torch.float16
     )
-    model.tie_weights()
-    model.eval()
-
-
-tokenizer = AutoTokenizer.from_pretrained(model_id)
-stop_list = ["\nHuman:", "\n```\n"]
-stop_token_ids = [tokenizer(x)["input_ids"] for x in stop_list]
-stop_token_ids = [torch.LongTensor(x).to(device) for x in stop_token_ids]
-
-
-# ----- Define custom stopping criteria object
-class StopOnTokens(StoppingCriteria):
-    def __call__(
-        self, input_ids: torch.LongTensor, scores: torch.FloatTensor, **kwargs
-    ) -> bool:
-        for stop_ids in stop_token_ids:
-            if torch.eq(input_ids[0][-len(stop_ids) :], stop_ids).all():
-                return True
-        return False
-
-
-stopping_criteria = StoppingCriteriaList([StopOnTokens()])
-
+    llm.tie_weights()
+    llm.eval()
+    return llm
 
 def move_inputs_to_device(inputs, device):
     """This function moves the our inputs to the correct device."""
@@ -129,31 +133,18 @@ def move_inputs_to_device(inputs, device):
         inputs[key] = inputs[key].to(device)
     return inputs
 
-
-def getVectorDB(path):
+def getVectorDB(path, useChroma=False, useFaiss=True):
     """Gets vector db for our documents."""
 
-    if path[-3:] == "txt":
-        loader = TextLoader(path)
-    # loader = DirectoryLoader(path, glob="./*/*.pdf", loader_cls=PyPDFLoader)
-    elif path[-3:] == "pdf":
-        #loader = PyPDFLoader(path, extract_images=True)
-        loader = UnstructuredPDFLoader(path)
-        print("using pdf")
-    elif path[-4:] == "xlsx":
-        loader = UnstructuredExcelLoader(path, )
-    pages = loader.load()
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=3000, chunk_overlap=0)
+    loader = getLoader(path)
+    # Data loader and splitting of data
+    data_split = getDataSplit(loader)
     embeddings = getModelEmbeddings()
-    data_split = text_splitter.split_documents(pages)
-    # vectordb = Chroma.from_documents(
-    #     data_split,
-    #     embedding=getModelEmbeddings(),
-    #     )
-    
-    return FAISS.from_documents(data_split, embeddings)
-    # return vectordb
 
+    ### This code below allows for Chromadb
+    if useChroma:
+        return Chroma.from_documents(data_split, embedding=embeddings)
+    return FAISS.from_documents(data_split, embeddings)
 
 def getModelEmbeddings():
     """Gets Model Embeddings"""
@@ -162,37 +153,25 @@ def getModelEmbeddings():
     model_kwargs = {"device": "mps"}
     return HuggingFaceEmbeddings(model_name=model_name, model_kwargs=model_kwargs)
 
-# if device != "mps":
-#     streamer = TextStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
-    
-    
-#     class CustomLLM(LLM):
-#         """This is a custom LLM class similar to pipeline in HuggingFace"""
+def getDataSplit(loader):
+    pages = loader.load()
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=3000, chunk_overlap=0)
+    data_split = text_splitter.split_documents(pages)
+    return data_split
 
-#         streamer: Optional[TextIteratorStreamer] = None
-
-#         def _call(self, prompt, stop=None, run_manager=None) -> str:
-#             self.streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, Timeout=5)
-#             inputs = tokenizer(prompt, return_tensors="pt")
-#             inputs = move_inputs_to_device(
-#                 inputs, device
-#             )  # Move inputs to the correct device
-#             kwargs = dict(
-#                 input_ids=inputs["input_ids"],
-#                 streamer=self.streamer,
-#                 max_new_tokens=512,
-#             )
-#             thread = Thread(target=llm.stream, kwargs=kwargs)
-#             thread.start()
-#             return ""
-
-#         @property
-#         def _llm_type(self) -> str:
-#             return "custom"
-    
-    
-#     llm = CustomLLM()
-    
+def getLoader(path):
+    if path[-3:] == "txt":
+        loader = TextLoader(path)
+    elif path[-3:] == "pdf":
+        loader = UnstructuredPDFLoader(path)
+        print("using pdf")
+    elif path[-4:] == "xlsx":
+        loader = UnstructuredExcelLoader(path, )
+    elif(path[:4] == "http") or (path[-5:] == ".com/" or path[-4:] == ".com"):
+        print("in webloader")
+        print(path)
+        loader = WebBaseLoader(path)
+    return loader
 
 def getLLMChain(llm, template):
     from operator import itemgetter
@@ -211,7 +190,6 @@ def getLLMChain(llm, template):
     | llm
     )
     return chain, memory
-
 
 def getRagChain(llm, vectordb, template):
     from operator import itemgetter
@@ -232,7 +210,6 @@ def getRagChain(llm, vectordb, template):
         | StrOutputParser()
     )
     return rag_chain, memory
-
 
 def getQARetreiverChain(llm, vectordb):
     QA_CHAIN_PROMPT = PromptTemplate(
@@ -308,7 +285,6 @@ def getSequentialChain():
     )
     return overall_simple_chain
 
-
 def getAgent(llm):
     from langchain.agents import load_tools, initialize_agent
     from langchain.agents import AgentType
@@ -353,7 +329,7 @@ def getNewAgentChain(llm):
     }
     )
     return agent
-# Tested this with langchain '0.0.179'
+
 def vote(data: gr.LikeData):
     file_path = "chat_data.json"
     # Check if the JSON file exists, if not, create one with an empty list
@@ -379,12 +355,4 @@ def vote(data: gr.LikeData):
     else:
         print(f"You downvoted this response: {data.value}")
 
-
-def pause_text_stream():
-    global pause_streaming
-    pause_streaming = True
-
-
-def resume_text_stream():
-    global pause_streaming
-    pause_streaming = False
+llm = getLLM()
