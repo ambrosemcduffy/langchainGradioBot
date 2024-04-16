@@ -26,10 +26,12 @@ vectordb = backend.getVectorDB(filePath)
 ragChain, memoryRAG = backend.getRagChain(backend.llm, vectordb, const.llmChainTemplateForRag)
 llm_chain, memory = backend.getLLMChain(backend.llm, const.llmChainTemplate)
 agentChain = backend.getNewAgentChain(backend.llm)
-#seqChain = backend.getSequentialChain()
+seqChain = backend.getSequentialChain()
 
 
 pause_streaming = False
+dropdown, js = create_theme_dropdown()
+import threading
 
 def streamChain(chain, history):
     history[-1][1] = ""
@@ -45,8 +47,6 @@ def streamChain(chain, history):
                 history[-1][1]  = history[-1][1]  + char
                 yield history
 
-dropdown, js = create_theme_dropdown()
-import threading
 class StreamController:
     def __init__(self):
         self.paused = False
@@ -139,6 +139,29 @@ def handle_urlInsert(urlPath):
         # Update the chains with the new vectordb
         update_chains(llm, const.llmChainTemplate, vectordb, isRag=True)
 
+def getSelectedChain(history):
+    if history[-1][0] is None:
+        history[-1][0] = ""
+                
+    if choices[chainSelected] == "Agent":
+        history[-1][1] = ""
+        question = {"input":history[-1][0]}
+        chain = agentChain
+    
+    if choices[chainSelected] == "RAG":
+        # if file_path_display.visible != True:
+        #     file_path_display.visible = True
+        print("Inside raaaaag!!!!!")
+        history[-1][1] = ""
+        question = history[-1][0]
+        chain = ragChain
+
+    if choices[chainSelected] == "LLM Chain":
+        history[-1][1] = ""
+        question = {"question": history[-1][0]}
+        chain = llm_chain        
+    return chain, history, question
+    
 
 with gr.Blocks(css=const.dark_theme_css, theme="gradio/default") as demo:
     controller = StreamController()
@@ -217,29 +240,10 @@ with gr.Blocks(css=const.dark_theme_css, theme="gradio/default") as demo:
             def bot(history):
                 global pause_streaming
                 global current_chain
-                if history[-1][0] is None:
-                    history[-1][0] = ""
+                chain, history, question = getSelectedChain(history)
                 
-                if choices[chainSelected] == "Agent":
-                    history[-1][1] = ""
-                    question = {"input":history[-1][0]}
-                    chain = agentChain
-                
-                if choices[chainSelected] == "RAG":
-                    # if file_path_display.visible != True:
-                    #     file_path_display.visible = True
-                    print("Inside raaaaag!!!!!")
-                    history[-1][1] = ""
-                    question = history[-1][0]
-                    chain = ragChain
-
-                if choices[chainSelected] == "LLM Chain":
-                    history[-1][1] = ""
-                    question = {"question": history[-1][0]}
-                    chain = llm_chain
-
                 for chunk in chain.stream(question):
-                    time.sleep(0.01)
+                    # time.sleep(0.07)
 
                     if type(chunk) == dict:
                         if "text" in chunk.keys():
@@ -251,7 +255,7 @@ with gr.Blocks(css=const.dark_theme_css, theme="gradio/default") as demo:
                             if char != '<':
                                 history[-1][1]  = history[-1][1]  + char
                                 yield history
-
+                
                 if chainSelected != "RAG":
                     memory.save_context({"input": history[-1][0]}, {"output": history[-1][1]})
                 else:
@@ -288,10 +292,8 @@ with gr.Blocks(css=const.dark_theme_css, theme="gradio/default") as demo:
                 inputs=[msg],
             )
 
-
 def same_auth(username, password):
     return username == password
-
 
 if __name__ == "__main__":
     demo.queue().launch(share=True)

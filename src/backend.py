@@ -1,28 +1,27 @@
 import os
 import torch
+
 import gradio as gr
+
 from langchain import PromptTemplate, LLMChain
 from langchain.chains.conversation.memory import ConversationBufferWindowMemory
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.embeddings import HuggingFaceEmbeddings
-from transformers import pipeline, TextStreamer
-from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
-from langchain.document_loaders import TextLoader, UnstructuredExcelLoader, UnstructuredPDFLoader, WebBaseLoader
+from langchain.document_loaders import TextLoader, UnstructuredExcelLoader, UnstructuredPDFLoader, WebBaseLoader, AsyncHtmlLoader, NewsURLLoader
 from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.vectorstores import FAISS, Chroma
 from langchain.llms.base import LLM
-from langchain.schema.runnable import RunnablePassthrough
 from langchain.schema.output_parser import StrOutputParser
 from langchain.memory import ConversationBufferMemory
-from llama_cpp import Llama
 from langchain.globals import set_debug
 
 from threading import Thread
 from typing import Optional
+
 from transformers import TextIteratorStreamer
-from transformers import StoppingCriteria, StoppingCriteriaList
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 import warnings
 import gradio as gr
@@ -140,6 +139,9 @@ def getVectorDB(path, useChroma=False, useFaiss=True):
     # Data loader and splitting of data
     data_split = getDataSplit(loader)
     embeddings = getModelEmbeddings()
+    print("This is the embeddings..\n\n")
+    print(embeddings)
+    print("\n\n")
 
     ### This code below allows for Chromadb
     if useChroma:
@@ -157,6 +159,9 @@ def getDataSplit(loader):
     pages = loader.load()
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=3000, chunk_overlap=0)
     data_split = text_splitter.split_documents(pages)
+    print("This is the data split..\n\n")
+    print(data_split)
+    print("\n\n")
     return data_split
 
 def getLoader(path):
@@ -168,9 +173,13 @@ def getLoader(path):
     elif path[-4:] == "xlsx":
         loader = UnstructuredExcelLoader(path, )
     elif(path[:4] == "http") or (path[-5:] == ".com/" or path[-4:] == ".com"):
-        print("in webloader")
-        print(path)
+        # print("in webloader")
+        # print(path)
         loader = WebBaseLoader(path)
+        #loader = NewsURLLoader(urls=path)
+    print("This is the loader..\n\n")
+    print(loader)
+    print("\n\n")
     return loader
 
 def getLLMChain(llm, template):
@@ -180,7 +189,8 @@ def getLLMChain(llm, template):
     prompt = PromptTemplate(
     input_variables=["context", "question", "history"], template=template
     )
-    memory = ConversationBufferMemory(memory_key="history", return_messages=True)
+    # memory = ConversationBufferMemory(memory_key="history", return_messages=True)
+    memory = ConversationBufferWindowMemory(memory_key="history", k=4, return_messages=True)
     chain = (
     RunnablePassthrough.assign(
         history=RunnableLambda(memory.load_memory_variables) | itemgetter("history")
@@ -198,7 +208,7 @@ def getRagChain(llm, vectordb, template):
     QA_CHAIN_PROMPT = PromptTemplate(
         input_variables=["context", "question", "history"], template=template
     )
-    memory = ConversationBufferMemory(memory_key="history", return_messages=True)
+    memory = ConversationBufferWindowMemory(memory_key="history", k=4, return_messages=True)
     rag_chain = (
         {
             "context": vectordb.as_retriever(search_kwargs={"k":3}),
