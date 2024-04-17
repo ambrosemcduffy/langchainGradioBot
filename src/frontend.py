@@ -2,7 +2,6 @@ import const
 import backend
 
 import gradio as gr
-import time
 
 from theme_dropdown import create_theme_dropdown  # noqa: F401
 import gradio as gr
@@ -26,8 +25,6 @@ vectordb = backend.getVectorDB(filePath)
 ragChain, memoryRAG = backend.getRagChain(backend.llm, vectordb, const.llmChainTemplateForRag)
 llm_chain, memory = backend.getLLMChain(backend.llm, const.llmChainTemplate)
 agentChain = backend.getNewAgentChain(backend.llm)
-seqChain = backend.getSequentialChain()
-
 
 pause_streaming = False
 dropdown, js = create_theme_dropdown()
@@ -162,138 +159,133 @@ def getSelectedChain(history):
         chain = llm_chain        
     return chain, history, question
     
+def runGradioChatApp():
+    with gr.Blocks(css=const.dark_theme_css, theme="gradio/default") as demo:
+        controller = StreamController()
+        with gr.Row().style(equal_height=True):
+            with gr.Column(scale=5):
+                gr.Markdown(
+                    f"""
+                    # LLAMA-2.7B AI Chatbot
+                    This is an example utilizing Langchain and the open-source Large Language Model (LLM) LLAMA-2.7B can significantly enhance analyzing in-house documentation.
+                    Langchain, a framework designed for developing language model-powered applications, facilitates the connection to various data sources like text files, PDFs, and HTML pages, making it effective for managing and querying documentation.
+                    LLAMA-2.7B, on the other hand, is a 7.3 billion parameter LLM capable of generating coherent text and performing diverse natural language processing tasks.
+                    It can be deployed locally, offering flexibility for various in-house setups.
+                    Together, Langchain and LLAMA-2.7B provide a robust solution for intelligently analyzing in-house documentation
+                    """
+                )
+            with gr.Column(scale=3):
+                with gr.Group():
+                    with gr.Tab("Chain Selections"):
+                        chainDropdown = gr.Dropdown(
+                            choices=choices,
+                            label="Select Chain",
+                            interactive=True,
+                            value=choices[0],
+                            type="index",
+                        )
+                        chainDropdown.change(select_chain, inputs=chainDropdown, outputs=[])
+                    with gr.Tab("Parameters"):
+                        with gr.Row():
+                            with gr.Column():
+                                tempSlider = gr.Slider(minimum=0.0, maximum=1.0, randomize=False, label="Temp")
+                                tempSlider.value = backend.llm.temperature
+                                state = gr.State(value=0)
+                                tempSlider.release(handleTemperatureChange, inputs=[tempSlider, state], outputs=[state])
 
-with gr.Blocks(css=const.dark_theme_css, theme="gradio/default") as demo:
-    controller = StreamController()
-    with gr.Row().style(equal_height=True):
-        with gr.Column(scale=5):
-            gr.Markdown(
-                f"""
-                # LLAMA-2.7B AI Chatbot
-                This is an example utilizing Langchain and the open-source Large Language Model (LLM) LLAMA-2.7B can significantly enhance analyzing in-house documentation.
-                Langchain, a framework designed for developing language model-powered applications, facilitates the connection to various data sources like text files, PDFs, and HTML pages, making it effective for managing and querying documentation.
-                LLAMA-2.7B, on the other hand, is a 7.3 billion parameter LLM capable of generating coherent text and performing diverse natural language processing tasks.
-                It can be deployed locally, offering flexibility for various in-house setups.
-                Together, Langchain and LLAMA-2.7B provide a robust solution for intelligently analyzing in-house documentation
-                """
-            )
-        with gr.Column(scale=3):
-            with gr.Group():
-                with gr.Tab("Chain Selections"):
-                    chainDropdown = gr.Dropdown(
-                        choices=choices,
-                        label="Select Chain",
-                        interactive=True,
-                        value=choices[0],
-                        type="index",
+                                maxTokensSlider = gr.Slider(minimum=50, maximum=4096, randomize=False, label="Max Tokens")
+                                maxTokensSlider.value = backend.llm.max_tokens
+                                maxTokensState = gr.State(value=0)
+                                maxTokensSlider.release(handleMaxTokensChange, inputs=[maxTokensSlider, maxTokensState], outputs=[maxTokensState])
+
+                                topKSlider = gr.Slider(minimum=1, maximum=50, randomize=False, label="Top K")
+                                topKSlider.value = backend.llm.top_k
+                                topKState = gr.State(value=0)
+                                topKSlider.release(handleTopKChange, inputs=[topKSlider, topKState], outputs=[topKState])
+
+                                topPSlider = gr.Slider(minimum=0.1, maximum=1.0, randomize=False, label="Top P (Nucleus sampling)")
+                                topPSlider.value = backend.llm.top_p
+                                topPState = gr.State(value=0)
+                                topPSlider.release(handleTopPChange, inputs=[topPSlider, topPState], outputs=[topPState])
+
+                                with gr.Accordion("Prompt", open=False):
+                                    promptMarkdown = gr.Markdown(wrap_in_code_block(const.llmChainTemplate))
+                                    newPrompt = gr.TextArea(label="New Prompt", visible=True, min_width=400, scale=5, lines=10)
+                                    newPrompt.change(fn=updatePrompt, inputs=newPrompt, outputs=promptMarkdown)
+                            
+                    with gr.Tab("Document upload"):
+                        with gr.Row():
+                            with gr.Column():
+                                uploaded_file = gr.File(label="Upload your text file", type="file", file_types=["txt"], visible=True)
+                                file_path_display = gr.Textbox(label="File Path", visible=True)
+                                uploaded_file.change(handle_uploaded_file, inputs=[uploaded_file], outputs=[file_path_display])
+                                urlPath = gr.Textbox(label="URL Path", visible=True)
+                                urlPath.change(handle_urlInsert, inputs=[urlPath], outputs=[])
+                            
+        with gr.Row():
+            with gr.Column(scale=4):
+                with gr.Row():  
+                    chatbot = gr.Chatbot(
+                        avatar_images=(const.imagePathHuman, "/Users/ambrosemcduffy/Documents/langchainGradioBot/images/bot.png"),
+                        bubble_full_width=False,
                     )
-                    chainDropdown.change(select_chain, inputs=chainDropdown, outputs=[])
-                with gr.Tab("Parameters"):
-                    with gr.Row():
-                        with gr.Column():
-                            tempSlider = gr.Slider(minimum=0.0, maximum=1.0, randomize=False, label="Temp")
-                            tempSlider.value = backend.llm.temperature
-                            state = gr.State(value=0)
-                            tempSlider.release(handleTemperatureChange, inputs=[tempSlider, state], outputs=[state])
-
-                            maxTokensSlider = gr.Slider(minimum=50, maximum=4096, randomize=False, label="Max Tokens")
-                            maxTokensSlider.value = backend.llm.max_tokens
-                            maxTokensState = gr.State(value=0)
-                            maxTokensSlider.release(handleMaxTokensChange, inputs=[maxTokensSlider, maxTokensState], outputs=[maxTokensState])
-
-                            topKSlider = gr.Slider(minimum=1, maximum=50, randomize=False, label="Top K")
-                            topKSlider.value = backend.llm.top_k
-                            topKState = gr.State(value=0)
-                            topKSlider.release(handleTopKChange, inputs=[topKSlider, topKState], outputs=[topKState])
-
-                            topPSlider = gr.Slider(minimum=0.1, maximum=1.0, randomize=False, label="Top P (Nucleus sampling)")
-                            topPSlider.value = backend.llm.top_p
-                            topPState = gr.State(value=0)
-                            topPSlider.release(handleTopPChange, inputs=[topPSlider, topPState], outputs=[topPState])
-
-                            with gr.Accordion("Prompt", open=False):
-                                promptMarkdown = gr.Markdown(wrap_in_code_block(const.llmChainTemplate))
-                                newPrompt = gr.TextArea(label="New Prompt", visible=True, min_width=400, scale=5, lines=10)
-                                newPrompt.change(fn=updatePrompt, inputs=newPrompt, outputs=promptMarkdown)
-                        
-                with gr.Tab("Document upload"):
-                    with gr.Row():
-                        with gr.Column():
-                            uploaded_file = gr.File(label="Upload your text file", type="file", file_types=["txt"], visible=True)
-                            file_path_display = gr.Textbox(label="File Path", visible=True)
-                            uploaded_file.change(handle_uploaded_file, inputs=[uploaded_file], outputs=[file_path_display])
-                            urlPath = gr.Textbox(label="URL Path", visible=True)
-                            urlPath.change(handle_urlInsert, inputs=[urlPath], outputs=[])
-                        
-    with gr.Row():
-        with gr.Column(scale=4):
-            with gr.Row():  
-                chatbot = gr.Chatbot(
-                    avatar_images=(const.imagePathHuman, "/Users/ambrosemcduffy/Documents/langchainGradioBot/images/bot.png"),
-                    bubble_full_width=False,
-                )
-                chatbot.like(backend.vote, None, None)
-                
-            def user(user_message, history):
-                return "", history + [[user_message, None]]
-
-            def bot(history):
-                global pause_streaming
-                global current_chain
-                chain, history, question = getSelectedChain(history)
-                
-                for chunk in chain.stream(question):
-                    # time.sleep(0.07)
-
-                    if type(chunk) == dict:
-                        if "text" in chunk.keys():
-                            chunk = chunk["text"]
-                        elif "output" in chunk.keys():
-                            chunk = chunk["output"]
-                    if len(chunk) != 0:
-                        for char in chunk:
-                            if char != '<':
-                                history[-1][1]  = history[-1][1]  + char
-                                yield history
-                
-                if chainSelected != "RAG":
-                    memory.save_context({"input": history[-1][0]}, {"output": history[-1][1]})
-                else:
-                    memoryRAG.save_context({"input": history[-1][0]}, {"output": history[-1][1]})
-                return history
+                    chatbot.like(backend.vote, None, None)
                     
-            msg = gr.Textbox(scale=7, max_height=500)
-            with gr.Row(scale=1):
-                msg_clickEvent = msg.submit(user, [msg, chatbot], [msg, chatbot], queue=False).then(
-                    bot, chatbot, chatbot
+                def user(user_message, history):
+                    return "", history + [[user_message, None]]
+
+                def bot(history):
+                    global pause_streaming
+                    global current_chain
+                    chain, history, question = getSelectedChain(history)
+                    
+                    for chunk in chain.stream(question):
+                        # time.sleep(0.07)
+
+                        if type(chunk) == dict:
+                            if "text" in chunk.keys():
+                                chunk = chunk["text"]
+                            elif "output" in chunk.keys():
+                                chunk = chunk["output"]
+                        if len(chunk) != 0:
+                            for char in chunk:
+                                if char != '<':
+                                    history[-1][1]  = history[-1][1]  + char
+                                    yield history
+                    
+                    if chainSelected != "RAG":
+                        memory.save_context({"input": history[-1][0]}, {"output": history[-1][1]})
+                    else:
+                        memoryRAG.save_context({"input": history[-1][0]}, {"output": history[-1][1]})
+                    return history
+                        
+                msg = gr.Textbox(scale=7, max_height=500)
+                with gr.Row(scale=1):
+                    msg_clickEvent = msg.submit(user, [msg, chatbot], [msg, chatbot], queue=False).then(
+                        bot, chatbot, chatbot
+                    )
+                    
+                    submit_button = gr.Button(label="Submit", variant="primary")
+                    submit_button.style(size="sm")
+                    click_event = submit_button.click(
+                        user, [msg, chatbot], [msg, chatbot], queue=False
+                    ).then(bot, chatbot, chatbot)
+                    
+                    stop_btn = gr.Button("Stop Streaming", variant="secondary").style(
+                        size="sm"
+                    )
+                    
+                    stop_btn.click(fn=None, inputs=None, outputs=None, cancels=[click_event, msg_clickEvent])
+                with gr.Row(scale=1):
+                    clear = gr.Button("Clear", variant="secondary").style(size="sm")
+                    clear.click(lambda: None, None, chatbot, queue=False)
+
+                gr.Examples(
+                    [
+                        "What are the major themes of the paper?",
+                        "Breakdown the paper.. Provide Subheadings.",
+                        "Provide a Summary for the paper.",
+                    ],
+                    inputs=[msg],
                 )
-                
-                submit_button = gr.Button(label="Submit", variant="primary")
-                submit_button.style(size="sm")
-                click_event = submit_button.click(
-                    user, [msg, chatbot], [msg, chatbot], queue=False
-                ).then(bot, chatbot, chatbot)
-                
-                stop_btn = gr.Button("Stop Streaming", variant="secondary").style(
-                    size="sm"
-                )
-                
-                stop_btn.click(fn=None, inputs=None, outputs=None, cancels=[click_event, msg_clickEvent])
-            with gr.Row(scale=1):
-                clear = gr.Button("Clear", variant="secondary").style(size="sm")
-                clear.click(lambda: None, None, chatbot, queue=False)
-
-            gr.Examples(
-                [
-                    "What are the major themes of the paper?",
-                    "Breakdown the paper.. Provide Subheadings.",
-                    "Provide a Summary for the paper.",
-                ],
-                inputs=[msg],
-            )
-
-def same_auth(username, password):
-    return username == password
-
-if __name__ == "__main__":
-    demo.queue().launch(share=True)
+    return demo

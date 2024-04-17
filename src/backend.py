@@ -9,7 +9,12 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
-from langchain.document_loaders import TextLoader, UnstructuredExcelLoader, UnstructuredPDFLoader, WebBaseLoader, AsyncHtmlLoader, NewsURLLoader
+from langchain.document_loaders import (
+    TextLoader,
+    UnstructuredExcelLoader,
+    UnstructuredPDFLoader,
+    WebBaseLoader,
+)
 from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.vectorstores import FAISS, Chroma
 from langchain.llms.base import LLM
@@ -35,6 +40,8 @@ os.environ["HUGGINGFACEHUB_API_TOKEN"] = "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"
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
 set_debug(True)
+
+
 def flush():
     gc.collect()
     torch.cuda.empty_cache()
@@ -65,10 +72,14 @@ global llm
 
 class CustomLLM(LLM):
     """This is a custom LLM class similar to pipeline in HuggingFace"""
+
     streamer: Optional[TextIteratorStreamer] = None
+
     def _call(self, prompt, stop=None, run_manager=None) -> str:
         self.tokenizer = AutoTokenizer.from_pretrained(model_id)
-        self.streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, Timeout=5)
+        self.streamer = TextIteratorStreamer(
+            self.tokenizer, skip_prompt=True, Timeout=5
+        )
         inputs = self.tokenizer(prompt, return_tensors="pt")
         inputs = move_inputs_to_device(
             inputs, device
@@ -92,6 +103,7 @@ def getLLM():
         return CustomLLM(LLM)
     return getLlamaCppModel()
 
+
 def getLlamaCppModel():
     from langchain.callbacks.manager import CallbackManager
     from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
@@ -100,8 +112,12 @@ def getLlamaCppModel():
     # Callbacks support token-wise streaming
     callback_manager = CallbackManager([StreamingStdOutCallbackHandler()])
 
-    n_gpu_layers = -1  # The number of layers to put on the GPU. The rest will be on the CPU. If you don't know how many layers there are, you can use -1 to move all to GPU.
-    n_batch = 512  # Should be between 1 and n_ctx, consider the amount of VRAM in your GPU.
+    n_gpu_layers = (
+        -1
+    )  # The number of layers to put on the GPU. The rest will be on the CPU. If you don't know how many layers there are, you can use -1 to move all to GPU.
+    n_batch = (
+        512  # Should be between 1 and n_ctx, consider the amount of VRAM in your GPU.
+    )
 
     # Make sure the model path is correct for your system!
     llm = LlamaCpp(
@@ -116,21 +132,22 @@ def getLlamaCppModel():
     )
     return llm
 
+
 def getHuggingFaceModel():
     llm = AutoModelForCausalLM.from_pretrained(
-        model_id,
-        device_map=device,
-        torch_dtype=torch.float16
+        model_id, device_map=device, torch_dtype=torch.float16
     )
     llm.tie_weights()
     llm.eval()
     return llm
+
 
 def move_inputs_to_device(inputs, device):
     """This function moves the our inputs to the correct device."""
     for key in inputs:
         inputs[key] = inputs[key].to(device)
     return inputs
+
 
 def getVectorDB(path, useChroma=False, useFaiss=True):
     """Gets vector db for our documents."""
@@ -148,12 +165,14 @@ def getVectorDB(path, useChroma=False, useFaiss=True):
         return Chroma.from_documents(data_split, embedding=embeddings)
     return FAISS.from_documents(data_split, embeddings)
 
+
 def getModelEmbeddings():
     """Gets Model Embeddings"""
     model_name = "BAAI/bge-large-en"
     encode_kwargs = {"normalize_embeddings": True}
     model_kwargs = {"device": "mps"}
     return HuggingFaceEmbeddings(model_name=model_name, model_kwargs=model_kwargs)
+
 
 def getDataSplit(loader):
     pages = loader.load()
@@ -164,6 +183,7 @@ def getDataSplit(loader):
     print("\n\n")
     return data_split
 
+
 def getLoader(path):
     if path[-3:] == "txt":
         loader = TextLoader(path)
@@ -171,49 +191,59 @@ def getLoader(path):
         loader = UnstructuredPDFLoader(path)
         print("using pdf")
     elif path[-4:] == "xlsx":
-        loader = UnstructuredExcelLoader(path, )
-    elif(path[:4] == "http") or (path[-5:] == ".com/" or path[-4:] == ".com"):
+        loader = UnstructuredExcelLoader(
+            path,
+        )
+    elif (path[:4] == "http") or (path[-5:] == ".com/" or path[-4:] == ".com"):
         # print("in webloader")
         # print(path)
         loader = WebBaseLoader(path)
-        #loader = NewsURLLoader(urls=path)
+        # loader = NewsURLLoader(urls=path)
     print("This is the loader..\n\n")
     print(loader)
     print("\n\n")
     return loader
 
+
 def getLLMChain(llm, template):
     from operator import itemgetter
     from langchain.memory import ConversationBufferMemory
     from langchain.schema.runnable import RunnableLambda, RunnablePassthrough
+
     prompt = PromptTemplate(
-    input_variables=["context", "question", "history"], template=template
+        input_variables=["context", "question", "history"], template=template
     )
     # memory = ConversationBufferMemory(memory_key="history", return_messages=True)
-    memory = ConversationBufferWindowMemory(memory_key="history", k=4, return_messages=True)
-    chain = (
-    RunnablePassthrough.assign(
-        history=RunnableLambda(memory.load_memory_variables) | itemgetter("history")
+    memory = ConversationBufferWindowMemory(
+        memory_key="history", k=4, return_messages=True
     )
-    
-    | prompt
-    | llm
+    chain = (
+        RunnablePassthrough.assign(
+            history=RunnableLambda(memory.load_memory_variables) | itemgetter("history")
+        )
+        | prompt
+        | llm
     )
     return chain, memory
+
 
 def getRagChain(llm, vectordb, template):
     from operator import itemgetter
     from langchain.memory import ConversationBufferMemory
     from langchain.schema.runnable import RunnableLambda, RunnablePassthrough
+
     QA_CHAIN_PROMPT = PromptTemplate(
         input_variables=["context", "question", "history"], template=template
     )
-    memory = ConversationBufferWindowMemory(memory_key="history", k=4, return_messages=True)
+    memory = ConversationBufferWindowMemory(
+        memory_key="history", k=4, return_messages=True
+    )
     rag_chain = (
         {
-            "context": vectordb.as_retriever(search_kwargs={"k":3}),
+            "context": vectordb.as_retriever(search_kwargs={"k": 3}),
             "question": RunnablePassthrough(),
-            "history": RunnableLambda(memory.load_memory_variables) | itemgetter("history")
+            "history": RunnableLambda(memory.load_memory_variables)
+            | itemgetter("history"),
         }
         | QA_CHAIN_PROMPT
         | llm
@@ -221,97 +251,11 @@ def getRagChain(llm, vectordb, template):
     )
     return rag_chain, memory
 
-def getQARetreiverChain(llm, vectordb):
-    QA_CHAIN_PROMPT = PromptTemplate(
-        input_variables=["context", "question"], template=const.qaTemplate
-    )
-    memory = ConversationBufferWindowMemory(
-        memory_key="history", k=3, input_key="question", return_messages=True
-    )
-    memory = ConversationBufferMemory(
-        memory_key="history", input_key="question", return_messages=True
-    )
-
-    qa_chain = RetrievalQA.from_chain_type(
-        llm,
-        retriever=vectordb.as_retriever(search_kwargs={"k": 10}),
-        return_source_documents=True,
-        chain_type="stuff",
-        chain_type_kwargs={
-            "prompt": QA_CHAIN_PROMPT,
-            "verbose": True,
-            "memory": memory,
-        },
-    )
-    return qa_chain
-
-def getSequentialChain():
-    """Sequential Chain these are multiple LLMS being queried one after another."""
-    from langchain.prompts.chat import ChatPromptTemplate
-    from langchain.chains import SequentialChain
-
-    first_prompt = """
-    <s>[INST] Your are a helpful AI chatbot use to help answer the users question you will adhere to these guidelines:
-    1. Use a formal tone
-    2. Explain step by step be thorough and thoughtful.
-    3. If unsure about the answer, state "I don't know" without fabricating details.
-    4. For code, ensure it's clean and commented for easy understanding.
-    5. Rephrase my question for better querying.
-    6. Always provide an answer, even if brief, for answer unsure say "I'm unsure about this one" or "I don't know".
-    7. Always prioritize accuracy and clarity in your answers. [/INST]</s>
-    Previous Interaction:
-    {chat_history}
-    [INST] Question: What is the best way to answer this question think about it before answering this question:  {question} [/INST]</s>
-    Answer:
-    """
-
-    # Chain 1
-
-    CHAIN_PROMPT1 = ChatPromptTemplate.from_template(first_prompt)
-    chain_one = LLMChain(llm=llm, prompt=CHAIN_PROMPT1, output_key="firstAnswer")
-
-    second_prompt = """
-    <s>[INST] Your are a helpful AI chatbot use to help answer the users question you will adhere to these guidelines:
-    1. Use a formal tone
-    2. Explain step by step be thorough and thoughtful.
-    3. If unsure about the answer, state "I don't know" without fabricating details.
-    4. For code, ensure it's clean and commented for easy understanding.
-    5. Rephrase my question for better querying.
-    6. Always provide an answer, even if brief, for answer unsure say "I'm unsure about this one" or "I don't know".
-    7. Always prioritize accuracy and clarity in your answers. [/INST]</s>
-    [INST] Question: Write a poem from this answer{firstAnswer} [/INST]</s>
-    Poem:
-    """
-    CHAIN_PROMPT2 = ChatPromptTemplate.from_template(second_prompt)
-
-    # chain 2
-    chain_two = LLMChain(llm=llm, prompt=CHAIN_PROMPT2, output_key="poem")
-
-    overall_simple_chain = SequentialChain(
-        chains=[chain_one, chain_two],
-        input_variables=["question", "chat_history"],
-        output_variables=["firstAnswer", "poem"],
-        verbose=True,
-    )
-    return overall_simple_chain
-
-def getAgent(llm):
-    from langchain.agents import load_tools, initialize_agent
-    from langchain.agents import AgentType
-
-    tools = load_tools(["llm-math", "wikipedia"], llm=llm)
-    agent = initialize_agent(
-        tools,
-        llm,
-        agent=AgentType.CHAT_ZERO_SHOT_REACT_DESCRIPTION,
-        handle_parsing_errors=True,
-        verbose=True,
-    )
-    return agent
 
 def getNewAgentChain(llm):
     from langchain.agents import load_tools, initialize_agent
     from langchain.agents import AgentType
+
     PREFIX = """<<SYS>> You are an AI ChatBot AGent Designed to help students with Research. Follow these guidelines:
     1. Adopt a formal tone throughout the interaction.
     2. Provide detailed, step-by-step explanations, ensuring your responses are thorough and considerate.
@@ -331,14 +275,15 @@ def getNewAgentChain(llm):
         agent=AgentType.CHAT_ZERO_SHOT_REACT_DESCRIPTION,
         handle_parsing_errors=True,
         verbose=True,
-        max_iterations = 10,
+        max_iterations=10,
         agent_kwargs={
-        'prefix': PREFIX, 
-#         'format_instructions': FORMAT_INSTRUCTIONS,
-#         'suffix': SUFFIX
-    }
+            "prefix": PREFIX,
+            #         'format_instructions': FORMAT_INSTRUCTIONS,
+            #         'suffix': SUFFIX
+        },
     )
     return agent
+
 
 def vote(data: gr.LikeData):
     file_path = "chat_data.json"
@@ -364,5 +309,6 @@ def vote(data: gr.LikeData):
         print(f"You upvoted this response: {data.value}")
     else:
         print(f"You downvoted this response: {data.value}")
+
 
 llm = getLLM()
