@@ -8,10 +8,28 @@ import gradio as gr
 
 global chosenTemplate
 choices = ["LLM Chain", "Agent", "RAG"]
+promptTemplatesChoices = ["Basic Prompt", "Email", "Article Summary", "Document Summary"]
 chainSelected = 0
+promptSelected = 0
+
 filePath = "./documents/assetData.txt"
 chosenTemplate = const.llmChainTemplate
 chosenTemplateRAG = const.llmChainTemplateForRag
+
+
+def select_prompt(selected_item):
+    global promptSelected
+    print(f" currently selected {promptTemplatesChoices[selected_item]}")
+    promptSelected = selected_item
+
+    if promptTemplatesChoices[selected_item] == "Email":
+        updatePrompt(const.emailTemplate)
+    elif promptTemplatesChoices[selected_item] == "Article Summary":
+        updatePrompt(const.summaryTemplate)
+    elif promptTemplatesChoices[selected_item] == "Document Summary":
+        updatePrompt(const.llmChainTemplateForRag)
+    else:
+        updatePrompt(const.llmChainTemplate1)
 
 def select_chain(selected_item):
     global chainSelected
@@ -158,6 +176,7 @@ def getSelectedChain(history):
         question = {"question": history[-1][0]}
         chain = llm_chain        
     return chain, history, question
+
     
 def runGradioChatApp():
     with gr.Blocks(css=const.dark_theme_css, theme="gradio/default") as demo:
@@ -208,10 +227,20 @@ def runGradioChatApp():
                                 topPState = gr.State(value=0)
                                 topPSlider.release(handleTopPChange, inputs=[topPSlider, topPState], outputs=[topPState])
 
-                                with gr.Accordion("Prompt", open=False):
+                                with gr.Accordion("Prompt Template Selection", open=False):
+                                    chainDropdownPrompt = gr.Dropdown(
+                                    choices=promptTemplatesChoices,
+                                    label="Select PromptTemplate",
+                                    interactive=True,
+                                    value=promptTemplatesChoices[0],
+                                    type="index",
+                                )
+                                chainDropdownPrompt.change(select_prompt, inputs=chainDropdownPrompt, outputs=[])
+                                with gr.Accordion("Custom Prompt", open=False):
                                     promptMarkdown = gr.Markdown(wrap_in_code_block(const.llmChainTemplate))
                                     newPrompt = gr.TextArea(label="New Prompt", visible=True, min_width=400, scale=5, lines=10)
                                     newPrompt.change(fn=updatePrompt, inputs=newPrompt, outputs=promptMarkdown)
+
                             
                     with gr.Tab("Document upload"):
                         with gr.Row():
