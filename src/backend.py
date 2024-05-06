@@ -14,6 +14,7 @@ from langchain.document_loaders import (
     UnstructuredExcelLoader,
     UnstructuredPDFLoader,
     WebBaseLoader,
+    NewsURLLoader,
 )
 from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.vectorstores import FAISS, Chroma
@@ -121,11 +122,12 @@ def getLlamaCppModel():
 
     # Make sure the model path is correct for your system!
     llm = LlamaCpp(
-        model_path="./models/llama-2-7b-arguments.Q8_0.gguf",
+        #model_path="./models/llama-2-7b-arguments.Q8_0.gguf",
+        model_path="./models/mistral-7b-instruct-v0.1.Q8_0.gguf",
         n_gpu_layers=n_gpu_layers,
         n_batch=n_batch,
         max_tokens=900,
-        n_ctx=8192,
+        n_ctx=4096,
         temperature=0.3,
         callback_manager=callback_manager,
         verbose=True,  # Verbose is required to pass to the callback manager
@@ -197,8 +199,8 @@ def getLoader(path):
     elif (path[:4] == "http") or (path[-5:] == ".com/" or path[-4:] == ".com"):
         # print("in webloader")
         # print(path)
-        loader = WebBaseLoader(path)
-        # loader = NewsURLLoader(urls=path)
+        # loader = WebBaseLoader(path)
+        loader = NewsURLLoader(urls=path)
     print("This is the loader..\n\n")
     print(loader)
     print("\n\n")

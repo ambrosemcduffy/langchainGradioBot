@@ -8,7 +8,7 @@ import gradio as gr
 
 global chosenTemplate
 choices = ["LLM Chain", "Agent", "RAG"]
-promptTemplatesChoices = ["Basic Prompt", "Email", "Article Summary", "Document Summary"]
+promptTemplatesChoices = ["Basic Prompt", "Email", "Article Summary", "Document Summary", "Script Template", "Social Media Template"]
 chainSelected = 0
 promptSelected = 0
 
@@ -28,8 +28,12 @@ def select_prompt(selected_item):
         updatePrompt(const.summaryTemplate)
     elif promptTemplatesChoices[selected_item] == "Document Summary":
         updatePrompt(const.llmChainTemplateForRag)
+    elif promptTemplatesChoices[selected_item] == "Script Template":
+        updatePrompt(const.scriptTemplate)
+    elif promptTemplatesChoices[selected_item] == "Social Media Template":
+        updatePrompt(const.socialMediaTemplate)
     else:
-        updatePrompt(const.llmChainTemplate1)
+        updatePrompt(const.llmChainTemplate)
 
 def select_chain(selected_item):
     global chainSelected
@@ -177,7 +181,15 @@ def getSelectedChain(history):
         chain = llm_chain        
     return chain, history, question
 
-    
+def clean_text(hash_map):
+    # Get the output text and strip leading/trailing whitespaces and newlines
+    cleaned_output = hash_map["text"].strip()
+    # Replace carriage returns and newlines within the string
+    cleaned_output = cleaned_output.replace('\r', '').replace('\n', ' ')
+    # Update the hash map with the cleaned output
+    hash_map["text"] = cleaned_output
+    return hash_map
+ 
 def runGradioChatApp():
     with gr.Blocks(css=const.dark_theme_css, theme="gradio/default") as demo:
         controller = StreamController()
@@ -266,22 +278,32 @@ def runGradioChatApp():
                 def bot(history):
                     global pause_streaming
                     global current_chain
+                    
                     chain, history, question = getSelectedChain(history)
                     
-                    for chunk in chain.stream(question):
-                        # time.sleep(0.07)
+                    firstChunk = True
 
+                    # Sometimes Gradio doesn't input my questions so this is a safety for NULL, or Empty questions.
+                    if question["question"] == "":
+                        question["question"] = "The user did not input any data please respond requesting to do so."
+                    
+                    for chunk in chain.stream(question):
                         if type(chunk) == dict:
                             if "text" in chunk.keys():
                                 chunk = chunk["text"]
                             elif "output" in chunk.keys():
                                 chunk = chunk["output"]
+                        # Gradio doesn't do well with leading space and newlines so this is strip them.
+                        if firstChunk:
+                            chunk = chunk.lstrip()
+                            firstChunk = False
+                        
                         if len(chunk) != 0:
                             for char in chunk:
-                                if char != '<':
-                                    history[-1][1]  = history[-1][1]  + char
-                                    yield history
+                                history[-1][1]  = history[-1][1]  + char
+                                yield history
                     
+                    # This is to capture memory for RAG
                     if chainSelected != "RAG":
                         memory.save_context({"input": history[-1][0]}, {"output": history[-1][1]})
                     else:
