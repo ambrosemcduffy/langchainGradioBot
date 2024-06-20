@@ -54,9 +54,6 @@ jobPostingTemplate = """
     ##### Ambrose's Resume #####:
     Ambrose McDuffy
     San Francisco, CA 94105
-    424-426-7840
-    ambrosemcduffywork@gmail.com
-
     Websites, Portfolios, Profiles
 
     https://github.com/ambrosemcduffy
