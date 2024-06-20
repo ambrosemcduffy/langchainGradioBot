@@ -40,7 +40,7 @@ warnings.filterwarnings("ignore", category=UserWarning)
 os.environ["HUGGINGFACEHUB_API_TOKEN"] = "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"
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
-set_debug(True)
+set_debug(False)
 
 
 def flush():
@@ -124,13 +124,15 @@ def getLlamaCppModel():
     llm = LlamaCpp(
         #model_path="./models/llama-2-7b-arguments.Q8_0.gguf",
         model_path="./models/mistral-7b-instruct-v0.1.Q8_0.gguf",
+        #model_path ="./models/Meta-Llama-3-8B-Instruct.Q8_0.gguf",
         n_gpu_layers=n_gpu_layers,
         n_batch=n_batch,
         max_tokens=900,
-        n_ctx=4096,
-        temperature=0.3,
+        #n_ctx=4096,
+        n_ctx=8096,
+        temperature=0.7,
         callback_manager=callback_manager,
-        verbose=True,  # Verbose is required to pass to the callback manager
+        verbose=False,  # Verbose is required to pass to the callback manager
     )
     return llm
 

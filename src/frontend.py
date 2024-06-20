@@ -8,7 +8,7 @@ import gradio as gr
 
 global chosenTemplate
 choices = ["LLM Chain", "Agent", "RAG"]
-promptTemplatesChoices = ["Basic Prompt", "Email", "Article Summary", "Document Summary", "Script Template", "Social Media Template"]
+promptTemplatesChoices = ["Basic Prompt", "Email", "Article Summary", "Document Summary", "Script Template", "Social Media Template", "Llama 3", "jobPostingTemplate", "llama3TemplateRAG"]
 chainSelected = 0
 promptSelected = 0
 
@@ -32,6 +32,10 @@ def select_prompt(selected_item):
         updatePrompt(const.scriptTemplate)
     elif promptTemplatesChoices[selected_item] == "Social Media Template":
         updatePrompt(const.socialMediaTemplate)
+    elif promptTemplatesChoices[selected_item] == "Llama 3":
+        updatePrompt(const.llama3Template)
+    elif promptTemplatesChoices[selected_item] == "jobPostingTemplate":
+        updatePrompt(const.jobPostingTemplate)
     else:
         updatePrompt(const.llmChainTemplate)
 
@@ -181,6 +185,47 @@ def getSelectedChain(history):
         chain = llm_chain        
     return chain, history, question
 
+def chatBot(question, history):
+    global pause_streaming
+    global current_chain
+    
+    chain, history, question = getSelectedChain(history)
+    
+    firstChunk = True
+    idx = 2
+
+    
+    for chunk in chain.stream(question):
+        if type(chunk) == dict:
+            if "text" in chunk.keys():
+                chunk = chunk["text"]
+            elif "output" in chunk.keys():
+                chunk = chunk["output"]
+        # Gradio doesn't do well with leading space and newlines so this is strip them.
+        if firstChunk and idx != 0:
+            chunk = chunk.lstrip()
+            firstChunk = False
+            idx -= 1
+        
+        if len(chunk) != 0:
+            for char in chunk:
+                history[-1][1]  = history[-1][1]  + char
+                yield history
+
+#### This is a test case below to test out a chatBot in the terminal if needed 
+#### Will eventually use this with argparse.
+def terminalChat():
+    history = []
+    while True:
+        userInput = input("You: ")
+        question = {"question": userInput}
+        response = llm_chain.invoke(question)
+        print(f"Chatbot: {response}")
+        print("\n")
+        #ççççprint(response)
+        # if question.lower() == "exit":
+        #     break
+
 def clean_text(hash_map):
     # Get the output text and strip leading/trailing whitespaces and newlines
     cleaned_output = hash_map["text"].strip()
@@ -282,10 +327,11 @@ def runGradioChatApp():
                     chain, history, question = getSelectedChain(history)
                     
                     firstChunk = True
+                    idx = 2
 
                     # Sometimes Gradio doesn't input my questions so this is a safety for NULL, or Empty questions.
-                    if question["question"] == "":
-                        question["question"] = "The user did not input any data please respond requesting to do so."
+                    # if question["question"] == "":
+                    #     question["question"] = "The user did not input any data please respond requesting to do so."
                     
                     for chunk in chain.stream(question):
                         if type(chunk) == dict:
@@ -294,9 +340,10 @@ def runGradioChatApp():
                             elif "output" in chunk.keys():
                                 chunk = chunk["output"]
                         # Gradio doesn't do well with leading space and newlines so this is strip them.
-                        if firstChunk:
+                        if firstChunk and idx != 0:
                             chunk = chunk.lstrip()
                             firstChunk = False
+                            idx -= 1
                         
                         if len(chunk) != 0:
                             for char in chunk:
